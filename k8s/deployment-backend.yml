@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: chat-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: chat-app-backend
+          image: ayushchoudhary6/chat-app-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5001
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "5001"
+            - name: MONGODB_URI
+              value: "mongodb://root:root@mongodb-service:27017/chatapp?authSource=admin"
+            - name: JWT_SECRET
+              value: "your-jwt-secret-key"
+            - name: CLOUDINARY_CLOUD_NAME
+              value: "your-cloudinary-name"
+            - name: CLOUDINARY_API_KEY
+              value: "your-cloudinary-api-key"
+            - name: CLOUDINARY_API_SECRET
+              value: "your-cloudinary-api-secret"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  namespace: chat-app
+spec:
+  selector:
+    app: backend
+  ports:
+    - port: 5001
+      targetPort: 5001
+  type: ClusterIP
