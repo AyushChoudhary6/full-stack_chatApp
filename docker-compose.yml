@@ -1,58 +1,65 @@
 services:
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: ayushchoudhary6/chat-frontend:latest
     ports:
-      - "8080:80"
+      - "3000:80"
+    environment:
+      - REACT_APP_API_URL=http://backend:5000
     depends_on:
       - backend
     networks:
-      - chat-network
-    environment:
-      - BACKEND_URL=http://backend:5001
-    restart: unless-stopped
+      - chatapp-network
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: ayushchoudhary6/chat-backend:latest
     ports:
-      - "5001:5001"
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - MONGODB_URI=mongodb://mongo:27017/chatapp_db
+      - JWT_SECRET=supersecretdev
     depends_on:
       - mongo
-    env_file:
-      - .env
     networks:
-      - chat-network
-    restart: unless-stopped
+      - chatapp-network
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   mongo:
-    image: mongo:latest
+    image: mongo:6.0
+    restart: always
+    volumes:
+      - mongo-data:/data/db
     ports:
       - "27017:27017"
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=root
-      - MONGO_INITDB_ROOT_PASSWORD=admin
-    volumes:
-      - mongodb_data:/data/db
     networks:
-      - chat-network
-    restart: unless-stopped
+      - chatapp-network
+    healthcheck:
+      test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # db:
+  #   image: postgres:latest
+  #   restart: always
+  #   environment:
+  #     POSTGRES_USER: chatapp
+  #     POSTGRES_PASSWORD: chatapp_password
+  #     POSTGRES_DB: chatapp_db
+  #   ports:
+  #     - "5432:5432"
+  #   networks:
+  #     - chatapp-network
 
 networks:
-  chat-network:
+  chatapp-network:
     driver: bridge
 
 volumes:
-  mongodb_data:
-
-
-
-
-
-
-
-
-
-
+  mongo-data:

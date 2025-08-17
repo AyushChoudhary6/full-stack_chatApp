@@ -22,9 +22,13 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(
   cors({
-    origin: process.env.NODE_ENV === "production" 
-      ? ["http://localhost:8080", "http://localhost"] 
-      : "http://localhost:5173",
+    origin: (() => {
+      if (process.env.NODE_ENV === "production") {
+        return ["http://localhost:8080", "http://localhost", "http://localhost:3000"];
+      }
+      // allow both vite dev server and nginx frontend during local testing
+      return ["http://localhost:5173", "http://localhost:3000"];
+    })(),
     credentials: true,
   })
 );
