@@ -1,0 +1,138 @@
+Kubernetes + Kind Debugging Cheat Sheet
+1️⃣ Cluster Setup
+
+Create a Kind cluster:
+
+kind create cluster --name chatapp
+
+
+Verify cluster:
+
+kubectl cluster-info
+kubectl get nodes
+
+
+Common issue: The connection to the server localhost:8080 was refused → cluster not running or kubeconfig not set.
+
+2️⃣ Namespace Issues
+
+If manifests specify namespace: chatapp, create it first:
+
+kubectl create namespace chatapp
+
+
+Or use -n chatapp when applying:
+
+kubectl apply -f backend-deployment.yml -n chatapp
+
+
+Namespace not found → resource creation fails.
+
+3️⃣ Ingress-Nginx on Kind
+
+Default manifests may include nodeSelector: ingress-ready=true.
+
+Problem: Pod stays Pending on Kind cluster.
+
+Fix Options:
+
+Label your node:
+
+kubectl label node <node-name> ingress-ready=true
+
+
+Remove nodeSelector:
+
+kubectl -n ingress-nginx patch deployment ingress-nginx-controller -p '{"spec": {"template": {"spec": {"nodeSelector": null}}}}'
+kubectl -n ingress-nginx rollout restart deployment ingress-nginx-controller
+
+
+Check pods:
+
+kubectl get pods -n ingress-nginx
+
+
+Service should be NodePort on Kind:
+
+kubectl get svc -n ingress-nginx
+
+4️⃣ Services & Deployments
+
+Service name must match Ingress backend. Example:
+
+spec:
+  selector:
+    app: frontend   # Must match Deployment labels
+  ports:
+    - port: 80
+      targetPort: 80
+
+
+Common errors:
+
+503 from Ingress → Service has no endpoints (check with kubectl describe svc <name> -n chatapp)
+
+Endpoints: <none> → labels mismatch between service selector and pod labels.
+
+Wrong targetPort → traffic cannot reach pod.
+
+5️⃣ Ingress Issues
+
+Check Ingress resource:
+
+kubectl get ingress -n chatapp
+kubectl describe ingress -n chatapp
+
+
+Rewrite rules for path-based routing:
+
+nginx.ingress.kubernetes.io/rewrite-target: /$1
+
+
+Ingress 503 → backend service missing or pods not ready.
+
+6️⃣ Quick Debug Commands
+
+Pods: kubectl get pods -n <namespace>
+
+Pod logs: kubectl logs <pod-name> -n <namespace>
+
+Services: kubectl get svc -n <namespace>
+
+Service details: kubectl describe svc <svc-name> -n <namespace>
+
+Port-forward for local testing:
+
+kubectl port-forward -n ingress-nginx service/ingress-nginx-controller 8080:80
+
+7️⃣ NodePort Access (for Kind)
+
+Ingress on Kind → NodePort
+
+Example: ingress-nginx-controller exposes 80:31600
+
+Access locally:
+
+http://localhost:31600/         # Frontend
+http://localhost:31600/api/...  # Backend
+
+
+/etc/hosts trick if using hostname in Ingress:
+
+127.0.0.1 chatapp.local
+
+8️⃣ Common Pitfalls
+Symptom	Cause	Fix
+Pod Pending	NodeSelector / Taints	Patch nodeSelector or label node
+curl / NodePort fails	Ingress Pod not Running	Check ingress-nginx controller pod
+Ingress 503	Service has no endpoints	Match service selector with pod labels
+Backend not reachable	Container port mismatch	Check Deployment containerPort vs Service targetPort
+
+💡 Key takeaway:
+
+Always verify namespace → deployment → service → ingress in this order.
+
+Use kubectl describe and kubectl logs liberally.
+
+NodePort + Port-forward is easiest for local testing on Kind.
+

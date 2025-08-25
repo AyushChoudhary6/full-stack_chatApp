@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: frontend-Deployment
+  name: frontend-deployment
   namespace: chatapp
   labels:
     app: frontend
@@ -21,6 +21,13 @@ spec:
           ports:
             - containerPort: 80
           env:
-            - name: REACT_APP_API_URL
-              value: http://backend:5000
+            - name: frontend-app
+              value: http://frontgib end:80
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
           
