@@ -21,10 +21,10 @@ spec:
           ports:
             - containerPort: 5000
           env:
-            - name: backend-app
-              value: http://backend:5000
             - name: MONGODB_URI
-              value: "your-mongodb-connection-string"
+              value: "mongodb+srv://ayushrjchoudhary2005:RuAICLXhtgoSTUOP@cluster0.b1nldtm.mongodb.net/mydatabase?retryWrites=true&w=majority&authSource=admin"
+            - name: PORT
+              value: "5000"
           resources:
             requests:
               memory: "128Mi"

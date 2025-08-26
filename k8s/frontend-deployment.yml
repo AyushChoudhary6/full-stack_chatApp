@@ -22,7 +22,7 @@ spec:
             - containerPort: 80
           env:
             - name: frontend-app
-              value: http://frontgib end:80
+              value: http://frontend:80
           resources:
             requests:
               memory: "128Mi"
