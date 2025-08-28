@@ -11,6 +11,9 @@ variables:
 # Build Backend
 build_backend:
   stage: build
+  image: docker:20.10.16
+  services:
+    - docker:20.10.16-dind
   script:
     - docker build -t $BACKEND_IMAGE ./backend
   only:
@@ -19,6 +22,9 @@ build_backend:
 # Build Frontend
 build_frontend:
   stage: build
+  image: docker:20.10.16
+  services:
+    - docker:20.10.16-dind
   script:
     - docker build -t $FRONTEND_IMAGE ./frontend
   only:
@@ -27,8 +33,11 @@ build_frontend:
 # Push Images
 push_images:
   stage: push
+  image: docker:20.10.16
+  services:
+    - docker:20.10.16-dind
   script:
-    - docker login -u $CI_DOCKER_USER -p $CI_DOCKER_PASSWORD
+    - echo "$CI_DOCKER_PASSWORD" | docker login -u "$CI_DOCKER_USER" --password-stdin
     - docker push $BACKEND_IMAGE
     - docker push $FRONTEND_IMAGE
   needs:
@@ -42,7 +51,11 @@ deploy:
   stage: deploy
   image: bitnami/kubectl:latest
   before_script:
-    - kubectl config set-cluster my-cluster --server=$KUBE_SERVER --certificate-authority=$KUBE_CA_PEM
+    # Save CA cert into a file
+    - echo "$KUBE_CA_PEM" > ca.pem
+
+    # Configure kubectl
+    - kubectl config set-cluster my-cluster --server=$KUBE_SERVER --certificate-authority=ca.pem
     - kubectl config set-credentials gitlab --token=$KUBE_TOKEN
     - kubectl config set-context gitlab --cluster=my-cluster --user=gitlab --namespace=$KUBE_NAMESPACE
     - kubectl config use-context gitlab
@@ -54,5 +67,3 @@ deploy:
     - kubectl rollout status deployment/frontend -n $KUBE_NAMESPACE
   only:
     - main
-
-  #run this
