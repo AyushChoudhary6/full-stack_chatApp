@@ -1,0 +1,56 @@
+stages:
+  - build
+  - push
+  - deploy
+
+variables:
+  DOCKER_DRIVER: overlay2
+  BACKEND_IMAGE: ayushchoudhary6/chat-app-backend:$CI_COMMIT_SHORT_SHA
+  FRONTEND_IMAGE: ayushchoudhary6/chat-app-frontend:$CI_COMMIT_SHORT_SHA
+
+# Build Backend
+build_backend:
+  stage: build
+  script:
+    - docker build -t $BACKEND_IMAGE ./backend
+  only:
+    - main
+
+# Build Frontend
+build_frontend:
+  stage: build
+  script:
+    - docker build -t $FRONTEND_IMAGE ./frontend
+  only:
+    - main
+
+# Push Images
+push_images:
+  stage: push
+  script:
+    - docker login -u $CI_DOCKER_USER -p $CI_DOCKER_PASSWORD
+    - docker push $BACKEND_IMAGE
+    - docker push $FRONTEND_IMAGE
+  needs:
+    - build_backend
+    - build_frontend
+  only:
+    - main
+
+# Deploy to K8s
+deploy:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  before_script:
+    - kubectl config set-cluster my-cluster --server=$KUBE_SERVER --certificate-authority=$KUBE_CA_PEM
+    - kubectl config set-credentials gitlab --token=$KUBE_TOKEN
+    - kubectl config set-context gitlab --cluster=my-cluster --user=gitlab --namespace=$KUBE_NAMESPACE
+    - kubectl config use-context gitlab
+  script:
+    - kubectl apply -f k8s/
+    - kubectl set image deployment/backend backend=$BACKEND_IMAGE -n $KUBE_NAMESPACE
+    - kubectl set image deployment/frontend frontend=$FRONTEND_IMAGE -n $KUBE_NAMESPACE
+    - kubectl rollout status deployment/backend -n $KUBE_NAMESPACE
+    - kubectl rollout status deployment/frontend -n $KUBE_NAMESPACE
+  only:
+    - main
