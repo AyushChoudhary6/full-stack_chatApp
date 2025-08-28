@@ -54,3 +54,5 @@ deploy:
     - kubectl rollout status deployment/frontend -n $KUBE_NAMESPACE
   only:
     - main
+
+
