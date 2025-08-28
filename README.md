@@ -34,7 +34,7 @@ This project aims to provide a real-time chat experience that's both scalable an
 * **Online Status**: View real-time online/offline status of users 
 
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 
 * **Backend:** Node.js, Express, MongoDB, Socket.io
