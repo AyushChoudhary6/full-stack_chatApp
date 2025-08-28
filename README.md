@@ -19,7 +19,7 @@ Welcome to the **Full Stack Realtime Chat App** project, where we're building a 
 * [Future Plans](#future-plans)
 * [License](#license)
 
-## 📝 Introduction
+## Introduction
 
 This project aims to provide a real-time chat experience that's both scalable and secure. With a focus on modern technologies, we're building an application that's easy to use and maintain.
 
