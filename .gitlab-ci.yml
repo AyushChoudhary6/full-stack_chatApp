@@ -7,8 +7,8 @@ variables:
   DOCKER_DRIVER: overlay2
   BACKEND_IMAGE: ayushchoudhary6/chat-app-backend:$CI_COMMIT_SHORT_SHA
   FRONTEND_IMAGE: ayushchoudhary6/chat-app-frontend:$CI_COMMIT_SHORT_SHA
-  KUBE_CONTEXT: "gitlab-agent-cicd-pipeline:agentk"  # <project>:<agent-name>
-  KUBE_NAMESPACE: "chat-app"  # Must match your manifests
+  KUBE_CONTEXT: "gitlab-agent-cicd-pipeline:agentk"  # Replace with your <project>:<agent-name>
+  KUBE_NAMESPACE: "chat-app"
 
 # -------------------------
 # Build Backend Image
@@ -74,26 +74,37 @@ deploy:
   image: google/cloud-sdk:latest  # Includes kubectl + bash
   needs: ["push_images"]
   script:
-    # Ensure namespace exists
+    # 1️⃣ Ensure namespace exists
     - |
-      if ! kubectl --context $KUBE_CONTEXT get ns "$KUBE_NAMESPACE"; then
+      if ! kubectl --context $KUBE_CONTEXT get ns "$KUBE_NAMESPACE" >/dev/null 2>&1; then
+        echo "Namespace $KUBE_NAMESPACE not found. Creating..."
         kubectl --context $KUBE_CONTEXT create ns "$KUBE_NAMESPACE"
+      else
+        echo "Namespace $KUBE_NAMESPACE already exists."
       fi
 
-    # Apply CRDs first (if you have any)
+    # 2️⃣ Apply CRDs first (if any)
     - |
       if [ -d "k8s/crds" ]; then
         kubectl --context $KUBE_CONTEXT apply -f k8s/crds/
       fi
 
-    # Apply manifests (let manifest control namespace)
-    - kubectl --context $KUBE_CONTEXT apply -f k8s/
+    # 3️⃣ Wait a few seconds for namespace/CRDs to be ready
+    - sleep 5
 
-    # Update deployments with new images
+    # 4️⃣ Apply manifests excluding kind-config.yml
+    - |
+      for f in k8s/*.yml; do
+        if [[ "$f" != "k8s/kind-config.yml" ]]; then
+          kubectl --context $KUBE_CONTEXT apply -f "$f" -n "$KUBE_NAMESPACE"
+        fi
+      done
+
+    # 5️⃣ Update deployments with new images
     - kubectl --context $KUBE_CONTEXT set image deployment/backend backend="$BACKEND_IMAGE" -n "$KUBE_NAMESPACE"
     - kubectl --context $KUBE_CONTEXT set image deployment/frontend frontend="$FRONTEND_IMAGE" -n "$KUBE_NAMESPACE"
 
-    # Wait for rollout
+    # 6️⃣ Wait for rollout
     - kubectl --context $KUBE_CONTEXT rollout status deployment/backend -n "$KUBE_NAMESPACE" --timeout=180s
     - kubectl --context $KUBE_CONTEXT rollout status deployment/frontend -n "$KUBE_NAMESPACE" --timeout=180s
   only:
