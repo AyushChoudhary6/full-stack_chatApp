@@ -72,10 +72,17 @@ deploy:
   stage: deploy
   image: google/cloud-sdk:latest  # Includes kubectl + bash
   needs: ["push_images"]
+  before_script:
+    # Install yq to parse YAML
+    - apt-get update && apt-get install -y python3-pip
+    - pip3 install yq
   script:
-    # 1️⃣ Ensure namespace from manifests exists
+    # 1️⃣ Extract namespace from backend manifest (manifest drives namespace)
+    - NS=$(yq e '.metadata.namespace' k8s/backend-deployment.yml)
+    - echo "Detected namespace: $NS"
+
+    # 2️⃣ Ensure namespace exists
     - |
-      NS=$(kubectl --context $KUBE_CONTEXT get -f k8s/backend-deployment.yml -o jsonpath='{.metadata.namespace}')
       if ! kubectl --context $KUBE_CONTEXT get ns "$NS" >/dev/null 2>&1; then
         echo "Namespace $NS not found. Creating..."
         kubectl --context $KUBE_CONTEXT create ns "$NS"
@@ -83,16 +90,16 @@ deploy:
         echo "Namespace $NS already exists."
       fi
 
-    # 2️⃣ Apply CRDs first (if any)
+    # 3️⃣ Apply CRDs first (if any)
     - |
       if [ -d "k8s/crds" ]; then
         kubectl --context $KUBE_CONTEXT apply -f k8s/crds/
       fi
 
-    # 3️⃣ Wait a few seconds for namespace/CRDs to be ready
+    # 4️⃣ Wait a few seconds for namespace/CRDs to be ready
     - sleep 5
 
-    # 4️⃣ Apply all manifests (let manifest define namespace)
+    # 5️⃣ Apply all manifests (manifest controls namespace)
     - |
       for f in k8s/*.yml; do
         if [[ "$f" != "k8s/kind-config.yml" ]]; then
@@ -100,11 +107,11 @@ deploy:
         fi
       done
 
-    # 5️⃣ Update deployments with new images
+    # 6️⃣ Update deployments with new images
     - kubectl --context $KUBE_CONTEXT set image deployment/backend backend="$BACKEND_IMAGE" -n "$NS"
     - kubectl --context $KUBE_CONTEXT set image deployment/frontend frontend="$FRONTEND_IMAGE" -n "$NS"
 
-    # 6️⃣ Wait for rollout
+    # 7️⃣ Wait for rollout
     - kubectl --context $KUBE_CONTEXT rollout status deployment/backend -n "$NS" --timeout=180s
     - kubectl --context $KUBE_CONTEXT rollout status deployment/frontend -n "$NS" --timeout=180s
   only:
