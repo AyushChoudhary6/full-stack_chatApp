@@ -58,7 +58,7 @@ push_images:
   only:
     - main
 
-# Deploy to K8s (shell-based image; install kubectl)
+# Deploy to K8s (using raw PEM variable)
 deploy:
   stage: deploy
   image: alpine:3.20
@@ -66,18 +66,15 @@ deploy:
   before_script:
     - set -euo pipefail
     - apk add --no-cache curl ca-certificates bash coreutils
-    # Install kubectl (stable); pin with KUBECTL_VERSION if you want a specific version
+    # Install kubectl
     - KVER="${KUBECTL_VERSION:-$(curl -sL https://dl.k8s.io/release/stable.txt)}"
     - curl -L -o /usr/local/bin/kubectl "https://dl.k8s.io/release/${KVER}/bin/linux/amd64/kubectl"
     - chmod +x /usr/local/bin/kubectl
     - kubectl version --client
-    # Write CA cert (supports raw PEM or base64 var)
-    - |
-      if [ -n "${KUBE_CA_PEM_BASE64:-}" ]; then
-        echo "$KUBE_CA_PEM_BASE64" | base64 -d > ca.pem
-      else
-        printf "%s" "${KUBE_CA_PEM:-}" > ca.pem
-      fi
+
+    # Write CA cert (raw PEM, no base64)
+    - printf "%s" "$KUBE_CA_PEM" > ca.pem
+
     # Configure kubectl
     - kubectl config set-cluster my-cluster --server="$KUBE_SERVER" --certificate-authority=ca.pem
     - kubectl config set-credentials gitlab --token="$KUBE_TOKEN"
