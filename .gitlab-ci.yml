@@ -16,6 +16,11 @@ build_backend:
     - docker:20.10.16-dind
   script:
     - docker build -t $BACKEND_IMAGE ./backend
+    - docker save -o backend.tar $BACKEND_IMAGE
+  artifacts:
+    paths:
+      - backend.tar
+    expire_in: 1h
   only:
     - main
 
@@ -27,6 +32,11 @@ build_frontend:
     - docker:20.10.16-dind
   script:
     - docker build -t $FRONTEND_IMAGE ./frontend
+    - docker save -o frontend.tar $FRONTEND_IMAGE
+  artifacts:
+    paths:
+      - frontend.tar
+    expire_in: 1h
   only:
     - main
 
@@ -36,13 +46,15 @@ push_images:
   image: docker:20.10.16
   services:
     - docker:20.10.16-dind
-  script:
-    - echo "$CI_DOCKER_PASSWORD" | docker login -u "$CI_DOCKER_USER" --password-stdin
-    - docker push $BACKEND_IMAGE
-    - docker push $FRONTEND_IMAGE
-  needs:
+  dependencies:
     - build_backend
     - build_frontend
+  script:
+    - echo "$CI_DOCKER_PASSWORD" | docker login -u "$CI_DOCKER_USER" --password-stdin
+    - docker load -i backend.tar
+    - docker load -i frontend.tar
+    - docker push $BACKEND_IMAGE
+    - docker push $FRONTEND_IMAGE
   only:
     - main
 
