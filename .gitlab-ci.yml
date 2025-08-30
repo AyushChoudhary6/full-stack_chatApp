@@ -7,7 +7,6 @@ variables:
   DOCKER_DRIVER: overlay2
   BACKEND_IMAGE: ayushchoudhary6/chat-app-backend:$CI_COMMIT_SHORT_SHA
   FRONTEND_IMAGE: ayushchoudhary6/chat-app-frontend:$CI_COMMIT_SHORT_SHA
-  KUBE_CONTEXT: "gitlab-agent-cicd-pipeline:agentk"  # Replace with your <project>:<agent-name>
 
 # -------------------------
 # Build Backend Image
@@ -70,30 +69,43 @@ push_images:
 # -------------------------
 deploy:
   stage: deploy
-  image: google/cloud-sdk:latest
+  image: bitnami/kubectl:latest
   needs: ["push_images"]
-  before_script:
-    - apt-get update && apt-get install -y python3-pip
-    - pip3 install yq
+  environment:
+    name: production
+    kubernetes:
+      namespace: chat-app  # Replace with your actual namespace
   script:
-    - NS=$(yq e '.metadata.namespace' k8s/backend-deployment.yml)
-    - echo "Detected namespace: $NS"
-    - |
-      if ! kubectl --context $KUBE_CONTEXT get ns "$NS" >/dev/null 2>&1; then
-        echo "Namespace $NS not found. Creating..."
-        kubectl --context $KUBE_CONTEXT create ns "$NS"
-      else
-        echo "Namespace $NS already exists."
-      fi
+    # Ensure namespace exists
+    - kubectl get ns chat-app || kubectl create ns chat-app
+    
+    # Apply CRDs first if they exist
     - |
       if [ -d "k8s/crds" ]; then
-        kubectl --context $KUBE_CONTEXT apply -f k8s/crds/
+        echo "Applying CRDs..."
+        kubectl apply -f k8s/crds/
+        sleep 10
       fi
-    - sleep 5
-    - for f in k8s/*.yml; do if [[ "$f" != "k8s/kind-config.yml" ]]; then kubectl --context $KUBE_CONTEXT apply -f "$f"; fi; done
-    - kubectl --context $KUBE_CONTEXT set image deployment/backend backend="$BACKEND_IMAGE" -n "$NS"
-    - kubectl --context $KUBE_CONTEXT set image deployment/frontend frontend="$FRONTEND_IMAGE" -n "$NS"
-    - kubectl --context $KUBE_CONTEXT rollout status deployment/backend -n "$NS" --timeout=180s
-    - kubectl --context $KUBE_CONTEXT rollout status deployment/frontend -n "$NS" --timeout=180s
+    
+    # Apply all Kubernetes manifests (excluding kind-config if present)
+    - |
+      for manifest in k8s/*.yml k8s/*.yaml; do
+        if [ -f "$manifest" ] && [[ "$manifest" != *"kind-config"* ]]; then
+          echo "Applying $manifest..."
+          kubectl apply -f "$manifest"
+        fi
+      done
+    
+    # Update deployment images
+    - kubectl set image deployment/backend backend="$BACKEND_IMAGE" -n chat-app
+    - kubectl set image deployment/frontend frontend="$FRONTEND_IMAGE" -n chat-app
+    
+    # Wait for deployments to complete
+    - kubectl rollout status deployment/backend -n chat-app --timeout=300s
+    - kubectl rollout status deployment/frontend -n chat-app --timeout=300s
+    
+    # Show deployment status
+    - kubectl get pods -n chat-app
+    - kubectl get services -n chat-app
   only:
     - main
