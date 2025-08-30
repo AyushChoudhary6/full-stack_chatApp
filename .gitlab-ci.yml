@@ -7,7 +7,8 @@ variables:
   DOCKER_DRIVER: overlay2
   BACKEND_IMAGE: ayushchoudhary6/chat-app-backend:$CI_COMMIT_SHORT_SHA
   FRONTEND_IMAGE: ayushchoudhary6/chat-app-frontend:$CI_COMMIT_SHORT_SHA
-  KUBE_CONTEXT: "gitlab-agent-cicd-pipeline:agentk"  # <- Replace with your <project>:<agent-name>
+  KUBE_CONTEXT: "gitlab-agent-cicd-pipeline:agentk"  # <project>:<agent-name>
+  KUBE_NAMESPACE: "default"  # replace if you have a different namespace
 
 # -------------------------
 # Build Backend Image
@@ -70,15 +71,17 @@ push_images:
 # -------------------------
 deploy:
   stage: deploy
-  image: bitnami/kubectl:latest
+  image: google/cloud-sdk:latest  # ⚠️ shell + kubectl included
   needs: ["push_images"]
   script:
     # Ensure namespace exists
-    - kubectl --context $KUBE_CONTEXT get ns "$KUBE_NAMESPACE" || \
-      kubectl --context $KUBE_CONTEXT create ns "$KUBE_NAMESPACE"
+    - |
+      if ! kubectl --context $KUBE_CONTEXT get ns "$KUBE_NAMESPACE"; then
+        kubectl --context $KUBE_CONTEXT create ns "$KUBE_NAMESPACE"
+      fi
 
     # Apply manifests
-    - kubectl --context $KUBE_CONTEXT apply -f k8s/
+    - kubectl --context $KUBE_CONTEXT apply -f k8s/ -n "$KUBE_NAMESPACE"
 
     # Update deployments with new images
     - kubectl --context $KUBE_CONTEXT set image deployment/backend backend="$BACKEND_IMAGE" -n "$KUBE_NAMESPACE"
