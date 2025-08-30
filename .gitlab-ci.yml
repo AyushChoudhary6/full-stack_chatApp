@@ -8,7 +8,9 @@ variables:
   BACKEND_IMAGE: ayushchoudhary6/chat-app-backend:$CI_COMMIT_SHORT_SHA
   FRONTEND_IMAGE: ayushchoudhary6/chat-app-frontend:$CI_COMMIT_SHORT_SHA
 
-# Build Backend
+# -------------------------
+# Build Backend Image
+# -------------------------
 build_backend:
   stage: build
   image: docker:20.10.16
@@ -24,7 +26,9 @@ build_backend:
   only:
     - main
 
-# Build Frontend
+# -------------------------
+# Build Frontend Image
+# -------------------------
 build_frontend:
   stage: build
   image: docker:20.10.16
@@ -40,7 +44,9 @@ build_frontend:
   only:
     - main
 
-# Push Images
+# -------------------------
+# Push Docker Images to Registry
+# -------------------------
 push_images:
   stage: push
   image: docker:20.10.16
@@ -58,7 +64,9 @@ push_images:
   only:
     - main
 
-# Deploy to K8s (using raw PEM variable)
+# -------------------------
+# Deploy to Kubernetes
+# -------------------------
 deploy:
   stage: deploy
   image: alpine:3.20
@@ -81,10 +89,17 @@ deploy:
     - kubectl config set-context gitlab --cluster=my-cluster --user=gitlab --namespace="$KUBE_NAMESPACE"
     - kubectl config use-context gitlab
   script:
+    # Ensure namespace exists
     - kubectl get ns "$KUBE_NAMESPACE" || kubectl create ns "$KUBE_NAMESPACE"
+
+    # Apply manifests
     - kubectl apply -f k8s/
+
+    # Update deployments with new images
     - kubectl set image deployment/backend backend="$BACKEND_IMAGE" -n "$KUBE_NAMESPACE"
     - kubectl set image deployment/frontend frontend="$FRONTEND_IMAGE" -n "$KUBE_NAMESPACE"
+
+    # Wait for rollout
     - kubectl rollout status deployment/backend -n "$KUBE_NAMESPACE" --timeout=180s
     - kubectl rollout status deployment/frontend -n "$KUBE_NAMESPACE" --timeout=180s
   only:
