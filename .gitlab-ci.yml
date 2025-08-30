@@ -58,7 +58,7 @@ push_images:
   only:
     - main
 
-# Deploy to K8s
+# Deploy to Kubernetes
 deploy:
   stage: deploy
   image: bitnami/kubectl:1.28
