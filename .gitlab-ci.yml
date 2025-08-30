@@ -58,21 +58,37 @@ push_images:
   only:
     - main
 
-# Deploy to Kubernetes
+# Deploy to K8s (shell-based image; install kubectl)
 deploy:
   stage: deploy
-  image: bitnami/kubectl:1.28
+  image: alpine:3.20
+  needs: ["push_images"]
   before_script:
-    - echo "$KUBE_CA_PEM" > ca.pem
-    - kubectl config set-cluster my-cluster --server=$KUBE_SERVER --certificate-authority=ca.pem
-    - kubectl config set-credentials gitlab --token=$KUBE_TOKEN
-    - kubectl config set-context gitlab --cluster=my-cluster --user=gitlab --namespace=$KUBE_NAMESPACE
+    - set -euo pipefail
+    - apk add --no-cache curl ca-certificates bash coreutils
+    # Install kubectl (stable); pin with KUBECTL_VERSION if you want a specific version
+    - KVER="${KUBECTL_VERSION:-$(curl -sL https://dl.k8s.io/release/stable.txt)}"
+    - curl -L -o /usr/local/bin/kubectl "https://dl.k8s.io/release/${KVER}/bin/linux/amd64/kubectl"
+    - chmod +x /usr/local/bin/kubectl
+    - kubectl version --client
+    # Write CA cert (supports raw PEM or base64 var)
+    - |
+      if [ -n "${KUBE_CA_PEM_BASE64:-}" ]; then
+        echo "$KUBE_CA_PEM_BASE64" | base64 -d > ca.pem
+      else
+        printf "%s" "${KUBE_CA_PEM:-}" > ca.pem
+      fi
+    # Configure kubectl
+    - kubectl config set-cluster my-cluster --server="$KUBE_SERVER" --certificate-authority=ca.pem
+    - kubectl config set-credentials gitlab --token="$KUBE_TOKEN"
+    - kubectl config set-context gitlab --cluster=my-cluster --user=gitlab --namespace="$KUBE_NAMESPACE"
     - kubectl config use-context gitlab
   script:
+    - kubectl get ns "$KUBE_NAMESPACE" || kubectl create ns "$KUBE_NAMESPACE"
     - kubectl apply -f k8s/
-    - kubectl set image deployment/backend backend=$BACKEND_IMAGE -n $KUBE_NAMESPACE
-    - kubectl set image deployment/frontend frontend=$FRONTEND_IMAGE -n $KUBE_NAMESPACE
-    - kubectl rollout status deployment/backend -n $KUBE_NAMESPACE
-    - kubectl rollout status deployment/frontend -n $KUBE_NAMESPACE
+    - kubectl set image deployment/backend backend="$BACKEND_IMAGE" -n "$KUBE_NAMESPACE"
+    - kubectl set image deployment/frontend frontend="$FRONTEND_IMAGE" -n "$KUBE_NAMESPACE"
+    - kubectl rollout status deployment/backend -n "$KUBE_NAMESPACE" --timeout=180s
+    - kubectl rollout status deployment/frontend -n "$KUBE_NAMESPACE" --timeout=180s
   only:
     - main
