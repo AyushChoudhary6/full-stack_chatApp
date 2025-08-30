@@ -7,6 +7,7 @@ variables:
   DOCKER_DRIVER: overlay2
   BACKEND_IMAGE: ayushchoudhary6/chat-app-backend:$CI_COMMIT_SHORT_SHA
   FRONTEND_IMAGE: ayushchoudhary6/chat-app-frontend:$CI_COMMIT_SHORT_SHA
+  KUBE_CONTEXT: "gitlab-agent-cicd-pipeline:agentk"  # <- Replace with your <project>:<agent-name>
 
 # -------------------------
 # Build Backend Image
@@ -65,42 +66,26 @@ push_images:
     - main
 
 # -------------------------
-# Deploy to Kubernetes
+# Deploy to Kubernetes (via GitLab Agent)
 # -------------------------
 deploy:
   stage: deploy
-  image: alpine:3.20
+  image: bitnami/kubectl:latest
   needs: ["push_images"]
-  before_script:
-    - set -euo pipefail
-    - apk add --no-cache curl ca-certificates bash coreutils
-    # Install kubectl
-    - KVER="${KUBECTL_VERSION:-$(curl -sL https://dl.k8s.io/release/stable.txt)}"
-    - curl -L -o /usr/local/bin/kubectl "https://dl.k8s.io/release/${KVER}/bin/linux/amd64/kubectl"
-    - chmod +x /usr/local/bin/kubectl
-    - kubectl version --client
-
-    # Write CA cert (raw PEM, no base64)
-    - printf "%s" "$KUBE_CA_PEM" > ca.pem
-
-    # Configure kubectl
-    - kubectl config set-cluster my-cluster --server="$KUBE_SERVER" --certificate-authority=ca.pem
-    - kubectl config set-credentials gitlab --token="$KUBE_TOKEN"
-    - kubectl config set-context gitlab --cluster=my-cluster --user=gitlab --namespace="$KUBE_NAMESPACE"
-    - kubectl config use-context gitlab
   script:
     # Ensure namespace exists
-    - kubectl get ns "$KUBE_NAMESPACE" || kubectl create ns "$KUBE_NAMESPACE"
+    - kubectl --context $KUBE_CONTEXT get ns "$KUBE_NAMESPACE" || \
+      kubectl --context $KUBE_CONTEXT create ns "$KUBE_NAMESPACE"
 
     # Apply manifests
-    - kubectl apply -f k8s/
+    - kubectl --context $KUBE_CONTEXT apply -f k8s/
 
     # Update deployments with new images
-    - kubectl set image deployment/backend backend="$BACKEND_IMAGE" -n "$KUBE_NAMESPACE"
-    - kubectl set image deployment/frontend frontend="$FRONTEND_IMAGE" -n "$KUBE_NAMESPACE"
+    - kubectl --context $KUBE_CONTEXT set image deployment/backend backend="$BACKEND_IMAGE" -n "$KUBE_NAMESPACE"
+    - kubectl --context $KUBE_CONTEXT set image deployment/frontend frontend="$FRONTEND_IMAGE" -n "$KUBE_NAMESPACE"
 
     # Wait for rollout
-    - kubectl rollout status deployment/backend -n "$KUBE_NAMESPACE" --timeout=180s
-    - kubectl rollout status deployment/frontend -n "$KUBE_NAMESPACE" --timeout=180s
+    - kubectl --context $KUBE_CONTEXT rollout status deployment/backend -n "$KUBE_NAMESPACE" --timeout=180s
+    - kubectl --context $KUBE_CONTEXT rollout status deployment/frontend -n "$KUBE_NAMESPACE" --timeout=180s
   only:
     - main
