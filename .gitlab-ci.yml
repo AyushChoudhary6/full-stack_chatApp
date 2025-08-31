@@ -27,7 +27,7 @@ build_and_push_frontend:
     - docker:20.10.24-dind
   script:
     - echo "Logging in to Docker Hub..."
-    - echo "$DOCKER_HUB_PASSWORD" | docker login -u "$DOCKER_HUB_USER" --password-stdin
+    - echo "$CI_DOCKER_PASSWORD" | docker login -u "$CI_DOCKER_USER" --password-stdin
     - echo "Building frontend Docker image..."
     - docker build -t $FRONTEND_IMAGE ./frontend
     - echo "Pushing frontend Docker image..."
