@@ -67,40 +67,38 @@ push_images:
 # -------------------------
 # Deploy to Kubernetes via GitLab Agent
 # -------------------------
-# -------------------------
-# Deploy to Kubernetes via GitLab Agent
-# -------------------------
+
 deploy:
   stage: deploy
-  image: alpine:latest
+  image: bitnami/kubectl:latest
   needs: ["push_images"]
-  before_script:
-    # Install kubectl
-    - apk add --no-cache curl
-    - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-    - chmod +x kubectl
-    - mv kubectl /usr/local/bin/
   environment:
     name: production
     kubernetes:
       namespace: chat-app
   script:
-    # Ensure namespace exists (ignore error if exists)
-    - kubectl create ns chat-app --dry-run=client -o yaml | kubectl apply -f -
+    # Debug: Check kubectl configuration
+    - kubectl version --client
+    - kubectl config current-context || echo "No current context"
+    - kubectl get nodes || echo "Cannot connect to cluster"
     
-    # Apply all Kubernetes manifests directly
-    - kubectl apply -f k8s/ --recursive=true
+    # Create namespace if it doesn't exist
+    - kubectl create namespace chat-app --dry-run=client -o yaml | kubectl apply -f -
     
-    # Update deployment images
-    - kubectl set image deployment/backend backend="$BACKEND_IMAGE" -n chat-app
-    - kubectl set image deployment/frontend frontend="$FRONTEND_IMAGE" -n chat-app
+    # Apply all Kubernetes manifests
+    - kubectl apply -f k8s/ --recursive
     
-    # Wait for deployments to complete
+    # Update deployment images with new tags
+    - kubectl set image deployment/backend backend=$BACKEND_IMAGE -n chat-app
+    - kubectl set image deployment/frontend frontend=$FRONTEND_IMAGE -n chat-app
+    
+    # Wait for rollout to complete
     - kubectl rollout status deployment/backend -n chat-app --timeout=300s
     - kubectl rollout status deployment/frontend -n chat-app --timeout=300s
     
-    # Show deployment status
+    # Show final status
     - kubectl get pods -n chat-app
     - kubectl get services -n chat-app
   only:
+    - main
     - main
