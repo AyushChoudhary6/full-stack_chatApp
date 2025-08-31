@@ -6,6 +6,7 @@ variables:
   BACKEND_IMAGE: $CI_DOCKER_USER/chat-app-backend:$CI_COMMIT_SHORT_SHA
   FRONTEND_IMAGE: $CI_DOCKER_USER/chat-app-frontend:$CI_COMMIT_SHORT_SHA
   DOCKER_TLS_CERTDIR: ""
+  KUBE_SERVER: https://127.0.0.1:38621
 
 build_and_push_backend:
   stage: build_and_push
