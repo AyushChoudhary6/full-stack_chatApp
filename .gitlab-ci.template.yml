@@ -1,5 +1,5 @@
-# GitLab CI/CD Pipeline for Full-Stack Chat Application
-# This pipeline includes: linting, testing, security scanning, building, and deployment
+# GitLab CI/CD Pipeline Template
+# Copy this file and customize for your specific environment
 
 stages:
   - validate
@@ -10,12 +10,26 @@ stages:
   - deploy
 
 variables:
+  # Customize these variables for your environment
   DOCKER_DRIVER: overlay2
-  DOCKER_TLS_CERTDIR: /certs
-  BACKEND_IMAGE: $CI_REGISTRY_IMAGE/chat-app-backend:$CI_COMMIT_SHORT_SHA
-  FRONTEND_IMAGE: $CI_REGISTRY_IMAGE/chat-app-frontend:$CI_COMMIT_SHORT_SHA
-  LATEST_BACKEND_IMAGE: $CI_REGISTRY_IMAGE/chat-app-backend:latest
-  LATEST_FRONTEND_IMAGE: $CI_REGISTRY_IMAGE/chat-app-frontend:latest
+  DOCKER_TLS_CERTDIR: "/certs"
+  
+  # Container Registry - Update with your registry
+  REGISTRY_URL: "your-registry.com"
+  REGISTRY_USER: "your-username"
+  BACKEND_IMAGE: "$REGISTRY_URL/chat-app-backend:$CI_COMMIT_SHORT_SHA"
+  FRONTEND_IMAGE: "$REGISTRY_URL/chat-app-frontend:$CI_COMMIT_SHORT_SHA"
+  LATEST_BACKEND_IMAGE: "$REGISTRY_URL/chat-app-backend:latest"
+  LATEST_FRONTEND_IMAGE: "$REGISTRY_URL/chat-app-frontend:latest"
+  
+  # Kubernetes Configuration
+  K8S_NAMESPACE: "chat-app"
+  K8S_CONTEXT: "your-cluster-context"
+  
+  # Environment URLs
+  DEV_URL: "https://dev-chat-app.yourdomain.com"
+  STAGING_URL: "https://staging-chat-app.yourdomain.com"
+  PROD_URL: "https://chat-app.yourdomain.com"
 
 # Cache dependencies for faster builds
 cache:
@@ -24,11 +38,15 @@ cache:
     - backend/node_modules/
     - frontend/node_modules/
 
+# Include this section if you want to use GitLab's built-in security scanning
+include:
+  - template: Security/SAST.gitlab-ci.yml
+  - template: Security/Container-Scanning.gitlab-ci.yml
+
 # -------------------------
 # Validate Stage
 # -------------------------
 
-# Lint Backend
 lint_backend:
   stage: validate
   image: node:20-alpine
@@ -45,7 +63,6 @@ lint_backend:
     - develop
     - merge_requests
 
-# Lint Frontend
 lint_frontend:
   stage: validate
   image: node:20-alpine
@@ -66,15 +83,14 @@ lint_frontend:
 # Test Stage
 # -------------------------
 
-# Test Backend
 test_backend:
   stage: test
   image: node:20-alpine
   services:
     - mongo:6.0
   variables:
-    MONGODB_URI: mongodb://mongo:27017/test
-    NODE_ENV: test
+    MONGODB_URI: "mongodb://mongo:27017/test"
+    NODE_ENV: "test"
   script:
     - cd backend
     - npm ci
@@ -88,7 +104,6 @@ test_backend:
     - develop
     - merge_requests
 
-# Test Frontend
 test_frontend:
   stage: test
   image: node:20-alpine
@@ -109,7 +124,7 @@ test_frontend:
 # Security Stage
 # -------------------------
 
-# Security scan for dependencies
+# Custom security scan for dependencies
 security_scan:
   stage: security
   image: node:20-alpine
@@ -129,29 +144,10 @@ security_scan:
     - develop
     - merge_requests
 
-# Container security scan
-container_scan:
-  stage: security
-  image: docker:20.10.16
-  services:
-    - docker:20.10.16-dind
-  script:
-    - echo "Container security scanning would be implemented here"
-    - echo "Consider using Trivy or Snyk for container scanning"
-  artifacts:
-    reports:
-      container_scanning: container-scan-report.json
-    expire_in: 1 week
-  only:
-    - main
-    - develop
-    - merge_requests
-
 # -------------------------
 # Build Stage
 # -------------------------
 
-# Build Backend Image
 build_backend:
   stage: build
   image: docker:20.10.16
@@ -168,7 +164,6 @@ build_backend:
     - main
     - develop
 
-# Build Frontend Image
 build_frontend:
   stage: build
   image: docker:20.10.16
@@ -189,7 +184,6 @@ build_frontend:
 # Push Stage
 # -------------------------
 
-# Push Docker Images to Registry
 push_images:
   stage: push
   image: docker:20.10.16
@@ -199,8 +193,8 @@ push_images:
     - build_backend
     - build_frontend
   script:
-    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER
-      $CI_REGISTRY --password-stdin
+    # Update this section with your registry authentication
+    - echo $REGISTRY_PASSWORD | docker login -u $REGISTRY_USER $REGISTRY_URL --password-stdin
     - docker load -i backend.tar
     - docker load -i frontend.tar
     - docker push $BACKEND_IMAGE
@@ -219,79 +213,106 @@ push_images:
 deploy_develop:
   stage: deploy
   image: bitnami/kubectl:latest
-  needs:
-    - push_images
+  needs: ["push_images"]
   environment:
     name: development
-    url: https://dev-chat-app.example.com
+    url: $DEV_URL
     kubernetes:
-      namespace: chat-app-dev
+      namespace: $K8S_NAMESPACE-dev
   script:
     - kubectl version --client
-    - kubectl config current-context || echo "No current context"
-    - kubectl get nodes || echo "Cannot connect to cluster"
-
+    - kubectl config use-context $K8S_CONTEXT
+    - kubectl get nodes
+    
     # Create namespace if it doesn't exist
-    - kubectl create namespace chat-app-dev --dry-run=client -o yaml | kubectl
-      apply -f -
-
-    # Apply Kubernetes manifests with development overrides
+    - kubectl create namespace $K8S_NAMESPACE-dev --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Apply Kubernetes manifests
     - kubectl apply -f k8s/ --recursive
-
-    # Update deployment images with new tags
-    - kubectl set image deployment/backend backend=$BACKEND_IMAGE -n chat-app-dev
-    - kubectl set image deployment/frontend frontend=$FRONTEND_IMAGE -n
-      chat-app-dev
-
-    # Wait for rollout to complete
-    - kubectl rollout status deployment/backend -n chat-app-dev --timeout=300s
-    - kubectl rollout status deployment/frontend -n chat-app-dev --timeout=300s
-
-    # Show final status
-    - kubectl get pods -n chat-app-dev
-    - kubectl get services -n chat-app-dev
+    
+    # Update deployment images
+    - kubectl set image deployment/backend backend=$BACKEND_IMAGE -n $K8S_NAMESPACE-dev
+    - kubectl set image deployment/frontend frontend=$FRONTEND_IMAGE -n $K8S_NAMESPACE-dev
+    
+    # Wait for rollout
+    - kubectl rollout status deployment/backend -n $K8S_NAMESPACE-dev --timeout=300s
+    - kubectl rollout status deployment/frontend -n $K8S_NAMESPACE-dev --timeout=300s
+    
+    # Show status
+    - kubectl get pods -n $K8S_NAMESPACE-dev
+    - kubectl get services -n $K8S_NAMESPACE-dev
   only:
     - develop
+
+# Deploy to Staging Environment
+deploy_staging:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  needs: ["push_images"]
+  environment:
+    name: staging
+    url: $STAGING_URL
+    kubernetes:
+      namespace: $K8S_NAMESPACE-staging
+  script:
+    - kubectl version --client
+    - kubectl config use-context $K8S_CONTEXT
+    - kubectl get nodes
+    
+    # Create namespace if it doesn't exist
+    - kubectl create namespace $K8S_NAMESPACE-staging --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Apply Kubernetes manifests
+    - kubectl apply -f k8s/ --recursive
+    
+    # Update deployment images
+    - kubectl set image deployment/backend backend=$BACKEND_IMAGE -n $K8S_NAMESPACE-staging
+    - kubectl set image deployment/frontend frontend=$FRONTEND_IMAGE -n $K8S_NAMESPACE-staging
+    
+    # Wait for rollout
+    - kubectl rollout status deployment/backend -n $K8S_NAMESPACE-staging --timeout=300s
+    - kubectl rollout status deployment/frontend -n $K8S_NAMESPACE-staging --timeout=300s
+    
+    # Show status
+    - kubectl get pods -n $K8S_NAMESPACE-staging
+    - kubectl get services -n $K8S_NAMESPACE-staging
+  only:
+    - main
+  when: manual
 
 # Deploy to Production Environment
 deploy_production:
   stage: deploy
   image: bitnami/kubectl:latest
-  needs:
-    - push_images
+  needs: ["push_images"]
   environment:
     name: production
-    url: https://chat-app.example.com
+    url: $PROD_URL
     kubernetes:
-      namespace: chat-app
+      namespace: $K8S_NAMESPACE
   script:
     - kubectl version --client
-    - kubectl config current-context || echo "No current context"
-    - kubectl get nodes || echo "Cannot connect to cluster"
-
+    - kubectl config use-context $K8S_CONTEXT
+    - kubectl get nodes
+    
     # Create namespace if it doesn't exist
-    - kubectl create namespace chat-app --dry-run=client -o yaml | kubectl apply
-      -f -
-
+    - kubectl create namespace $K8S_NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+    
     # Apply Kubernetes manifests
     - kubectl apply -f k8s/ --recursive
-
-    # Update deployment images with new tags
-    - kubectl set image deployment/backend backend=$BACKEND_IMAGE -n chat-app
-    - kubectl set image deployment/frontend frontend=$FRONTEND_IMAGE -n chat-app
-
-    # Wait for rollout to complete
-    - kubectl rollout status deployment/backend -n chat-app --timeout=300s
-    - kubectl rollout status deployment/frontend -n chat-app --timeout=300s
-
-    # Show final status
-    - kubectl get pods -n chat-app
-    - kubectl get services -n chat-app
-
+    
+    # Update deployment images
+    - kubectl set image deployment/backend backend=$BACKEND_IMAGE -n $K8S_NAMESPACE
+    - kubectl set image deployment/frontend frontend=$FRONTEND_IMAGE -n $K8S_NAMESPACE
+    
+    # Wait for rollout
+    - kubectl rollout status deployment/backend -n $K8S_NAMESPACE --timeout=300s
+    - kubectl rollout status deployment/frontend -n $K8S_NAMESPACE --timeout=300s
+    
     # Health check
     - echo "Performing health checks..."
     - sleep 30
-    - kubectl get pods -n chat-app -o wide
+    - kubectl get pods -n $K8S_NAMESPACE -o wide
   only:
     - main
   when: manual
@@ -306,36 +327,9 @@ notify_deployment:
   image: curlimages/curl:latest
   script:
     - echo "Deployment notification would be sent here"
-    - echo "Consider integrating with Slack, Teams, or email notifications"
+    - echo "Update with your notification service (Slack, Teams, etc.)"
   dependencies:
     - deploy_production
   only:
     - main
   when: on_success
-Transform: AWS::Serverless-2016-10-31
-Resources:
-  Api:
-    Type: AWS::Serverless::Api
-    Properties:
-      Name: !Sub
-        - ${ResourceName} From Stack ${AWS::StackName}
-        - ResourceName: Api
-      StageName: Prod
-      DefinitionBody:
-        openapi: '3.0'
-        info: {}
-        paths:
-          /:
-            get:
-              responses: {}
-      EndpointConfiguration: REGIONAL
-      TracingEnabled: true
-  UserPool:
-    Type: AWS::Cognito::UserPool
-    Properties:
-      AdminCreateUserConfig:
-        AllowAdminCreateUserOnly: false
-      AliasAttributes:
-        - email
-        - preferred_username
-      UserPoolName: !Sub ${AWS::StackName}-UserPool
