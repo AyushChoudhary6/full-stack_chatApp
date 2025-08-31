@@ -14,13 +14,13 @@ build_backend:
   stage: build
   script:
     - echo "Building backend Docker image..."
-    - docker build -t $BACKEND_IMAGE ./backend
+    - Docker build -t $BACKEND_IMAGE ./backend
 
 build_frontend:
   stage: build
   script:
     - echo "Building frontend Docker image..."
-    - docker build -t $FRONTEND_IMAGE ./frontend
+    - Docker build -t $FRONTEND_IMAGE ./frontend
 
 # -------------------------
 # Push Stage
@@ -32,9 +32,9 @@ push_images:
     - build_frontend
   script:
     - echo "Logging in to GitLab Container Registry..."
-    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
-    - docker push $BACKEND_IMAGE
-    - docker push $FRONTEND_IMAGE
+    - echo $CI_REGISTRY_PASSWORD | Docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
+    - Docker push $BACKEND_IMAGE
+    - Docker push $FRONTEND_IMAGE
 
 # -------------------------
 # Deploy Stage
