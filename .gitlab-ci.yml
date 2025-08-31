@@ -1,34 +1,95 @@
+stages:
+  - build
+  - push
+  - deploy
+
+variables:
+  DOCKER_DRIVER: overlay2
+  BACKEND_IMAGE: ayushchoudhary6/chat-app-backend:$CI_COMMIT_SHORT_SHA
+  FRONTEND_IMAGE: ayushchoudhary6/chat-app-frontend:$CI_COMMIT_SHORT_SHA
+
+# -------------------------
+# Build Backend Image
+# -------------------------
+build_backend:
+  stage: build
+  image: docker:20.10.16
+  services:
+    - docker:20.10.16-dind
+  script:
+    - docker build -t $BACKEND_IMAGE ./backend
+    - docker save -o backend.tar $BACKEND_IMAGE
+  artifacts:
+    paths:
+      - backend.tar
+    expire_in: 1h
+  only:
+    - main
+
+# -------------------------
+# Build Frontend Image
+# -------------------------
+build_frontend:
+  stage: build
+  image: docker:20.10.16
+  services:
+    - docker:20.10.16-dind
+  script:
+    - docker build -t $FRONTEND_IMAGE ./frontend
+    - docker save -o frontend.tar $FRONTEND_IMAGE
+  artifacts:
+    paths:
+      - frontend.tar
+    expire_in: 1h
+  only:
+    - main
+
+# -------------------------
+# Push Docker Images to Registry
+# -------------------------
+push_images:
+  stage: push
+  image: docker:20.10.16
+  services:
+    - docker:20.10.16-dind
+  dependencies:
+    - build_backend
+    - build_frontend
+  script:
+    - echo "$CI_DOCKER_PASSWORD" | docker login -u "$CI_DOCKER_USER" --password-stdin
+    - docker load -i backend.tar
+    - docker load -i frontend.tar
+    - docker push $BACKEND_IMAGE
+    - docker push $FRONTEND_IMAGE
+  only:
+    - main
+
+# -------------------------
+# Deploy to Kubernetes via GitLab Agent
+# -------------------------
 # -------------------------
 # Deploy to Kubernetes via GitLab Agent
 # -------------------------
 deploy:
   stage: deploy
-  image: alpine/kubectl:latest  # This image includes shell support
+  image: alpine:latest
   needs: ["push_images"]
+  before_script:
+    # Install kubectl
+    - apk add --no-cache curl
+    - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    - chmod +x kubectl
+    - mv kubectl /usr/local/bin/
   environment:
     name: production
     kubernetes:
       namespace: chat-app
   script:
-    # Ensure namespace exists
-    - kubectl get ns chat-app || kubectl create ns chat-app
+    # Ensure namespace exists (ignore error if exists)
+    - kubectl create ns chat-app --dry-run=client -o yaml | kubectl apply -f -
     
-    # Apply CRDs first if they exist
-    - |
-      if [ -d "k8s/crds" ]; then
-        echo "Applying CRDs..."
-        kubectl apply -f k8s/crds/
-        sleep 10
-      fi
-    
-    # Apply all Kubernetes manifests (excluding kind-config if present)
-    - |
-      for manifest in k8s/*.yml k8s/*.yaml; do
-        if [ -f "$manifest" ] && [[ "$manifest" != *"kind-config"* ]]; then
-          echo "Applying $manifest..."
-          kubectl apply -f "$manifest"
-        fi
-      done
+    # Apply all Kubernetes manifests directly
+    - kubectl apply -f k8s/ --recursive=true
     
     # Update deployment images
     - kubectl set image deployment/backend backend="$BACKEND_IMAGE" -n chat-app
