@@ -6,6 +6,7 @@ variables:
   BACKEND_IMAGE: $CI_REGISTRY_IMAGE/chat-app-backend:$CI_COMMIT_SHORT_SHA
   FRONTEND_IMAGE: $CI_REGISTRY_IMAGE/chat-app-frontend:$CI_COMMIT_SHORT_SHA
   DOCKER_TLS_CERTDIR: ""
+  CI_REGISTRY: registry.gitlab.com
 
 build_and_push_backend:
   stage: build_and_push
