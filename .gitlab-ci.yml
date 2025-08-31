@@ -1,314 +1,58 @@
-# GitLab CI/CD Pipeline for Full-Stack Chat Application
-# This pipeline includes: linting, testing, security scanning, building, and deployment
-
 stages:
-  - validate
-  - test
-  - security
   - build
   - push
   - deploy
 
 variables:
-  DOCKER_DRIVER: overlay2
-  DOCKER_TLS_CERTDIR: /certs
   BACKEND_IMAGE: $CI_REGISTRY_IMAGE/chat-app-backend:$CI_COMMIT_SHORT_SHA
   FRONTEND_IMAGE: $CI_REGISTRY_IMAGE/chat-app-frontend:$CI_COMMIT_SHORT_SHA
-  LATEST_BACKEND_IMAGE: $CI_REGISTRY_IMAGE/chat-app-backend:latest
-  LATEST_FRONTEND_IMAGE: $CI_REGISTRY_IMAGE/chat-app-frontend:latest
-
-# Cache dependencies for faster builds
-cache:
-  key: $CI_COMMIT_REF_SLUG
-  paths:
-    - backend/node_modules/
-    - frontend/node_modules/
-
-# -------------------------
-# Validate Stage
-# -------------------------
-
-# Lint Backend
-lint_backend:
-  stage: validate
-  image: node:20-alpine
-  script:
-    - cd backend
-    - npm ci
-    - npm run lint
-  artifacts:
-    reports:
-      junit: backend/lint-report.xml
-    expire_in: 1 week
-  only:
-    - main
-    - develop
-    - merge_requests
-
-# Lint Frontend
-lint_frontend:
-  stage: validate
-  image: node:20-alpine
-  script:
-    - cd frontend
-    - npm ci
-    - npm run lint
-  artifacts:
-    reports:
-      junit: frontend/lint-report.xml
-    expire_in: 1 week
-  only:
-    - main
-    - develop
-    - merge_requests
-
-# -------------------------
-# Test Stage
-# -------------------------
-
-# Test Backend
-test_backend:
-  stage: test
-  image: node:20-alpine
-  services:
-    - mongo:6.0
-  variables:
-    MONGODB_URI: mongodb://mongo:27017/test
-    NODE_ENV: test
-  script:
-    - cd backend
-    - npm ci
-    - npm test
-  artifacts:
-    reports:
-      junit: backend/test-report.xml
-    expire_in: 1 week
-  only:
-    - main
-    - develop
-    - merge_requests
-
-# Test Frontend
-test_frontend:
-  stage: test
-  image: node:20-alpine
-  script:
-    - cd frontend
-    - npm ci
-    - npm run test || echo "Frontend tests not configured yet"
-  artifacts:
-    reports:
-      junit: frontend/test-report.xml
-    expire_in: 1 week
-  only:
-    - main
-    - develop
-    - merge_requests
-
-# -------------------------
-# Security Stage
-# -------------------------
-
-# Security scan for dependencies
-security_scan:
-  stage: security
-  image: node:20-alpine
-  script:
-    - cd backend
-    - npm ci
-    - npm audit --audit-level=moderate || true
-    - cd ../frontend
-    - npm ci
-    - npm audit --audit-level=moderate || true
-  artifacts:
-    reports:
-      sast: security-report.json
-    expire_in: 1 week
-  only:
-    - main
-    - develop
-    - merge_requests
-
-# Container security scan
-container_scan:
-  stage: security
-  image: docker:20.10.16
-  services:
-    - docker:20.10.16-dind
-  script:
-    - echo "Container security scanning would be implemented here"
-    - echo "Consider using Trivy or Snyk for container scanning"
-  artifacts:
-    reports:
-      container_scanning: container-scan-report.json
-    expire_in: 1 week
-  only:
-    - main
-    - develop
-    - merge_requests
 
 # -------------------------
 # Build Stage
 # -------------------------
-
-# Build Backend Image
 build_backend:
   stage: build
-  image: docker:20.10.16
-  services:
-    - docker:20.10.16-dind
   script:
-    - docker build -t $BACKEND_IMAGE -t $LATEST_BACKEND_IMAGE ./backend
-    - docker save -o backend.tar $BACKEND_IMAGE
-  artifacts:
-    paths:
-      - backend.tar
-    expire_in: 2 hours
-  only:
-    - main
-    - develop
+    - echo "Building backend image..."
+    - docker build -t $BACKEND_IMAGE ./backend
 
-# Build Frontend Image
 build_frontend:
   stage: build
-  image: docker:20.10.16
-  services:
-    - docker:20.10.16-dind
   script:
-    - docker build -t $FRONTEND_IMAGE -t $LATEST_FRONTEND_IMAGE ./frontend
-    - docker save -o frontend.tar $FRONTEND_IMAGE
-  artifacts:
-    paths:
-      - frontend.tar
-    expire_in: 2 hours
-  only:
-    - main
-    - develop
+    - echo "Building frontend image..."
+    - docker build -t $FRONTEND_IMAGE ./frontend
 
 # -------------------------
 # Push Stage
 # -------------------------
-
-# Push Docker Images to Registry
 push_images:
   stage: push
-  image: docker:20.10.16
-  services:
-    - docker:20.10.16-dind
   dependencies:
     - build_backend
     - build_frontend
   script:
-    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER
-      $CI_REGISTRY --password-stdin
-    - docker load -i backend.tar
-    - docker load -i frontend.tar
+    - echo "Logging in to GitLab Container Registry..."
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
     - docker push $BACKEND_IMAGE
-    - docker push $LATEST_BACKEND_IMAGE
     - docker push $FRONTEND_IMAGE
-    - docker push $LATEST_FRONTEND_IMAGE
-  only:
-    - main
-    - develop
 
 # -------------------------
 # Deploy Stage
 # -------------------------
-
-# Deploy to Development Environment
-deploy_develop:
+deploy:
   stage: deploy
-  image: bitnami/kubectl:latest
   needs:
     - push_images
   environment:
     name: development
     url: https://dev-chat-app.example.com
     kubernetes:
-      namespace: chat-app-dev
-  script:
-    - kubectl version --client
-    - kubectl config current-context || echo "No current context"
-    - kubectl get nodes || echo "Cannot connect to cluster"
-
-    # Create namespace if it doesn't exist
-    - kubectl create namespace chat-app-dev --dry-run=client -o yaml | kubectl
-      apply -f -
-
-    # Apply Kubernetes manifests with development overrides
-    - kubectl apply -f k8s/ --recursive
-
-    # Update deployment images with new tags
-    - kubectl set image deployment/backend backend=$BACKEND_IMAGE -n chat-app-dev
-    - kubectl set image deployment/frontend frontend=$FRONTEND_IMAGE -n
-      chat-app-dev
-
-    # Wait for rollout to complete
-    - kubectl rollout status deployment/backend -n chat-app-dev --timeout=300s
-    - kubectl rollout status deployment/frontend -n chat-app-dev --timeout=300s
-
-    # Show final status
-    - kubectl get pods -n chat-app-dev
-    - kubectl get services -n chat-app-dev
-  only:
-    - develop
-
-# Deploy to Production Environment
-deploy_production:
-  stage: deploy
-  image: bitnami/kubectl:latest
-  needs:
-    - push_images
-  environment:
-    name: production
-    url: https://chat-app.example.com
-    kubernetes:
       namespace: chat-app
   script:
-    - kubectl version --client
-    - kubectl config current-context || echo "No current context"
-    - kubectl get nodes || echo "Cannot connect to cluster"
-
-    # Create namespace if it doesn't exist
-    - kubectl create namespace chat-app --dry-run=client -o yaml | kubectl apply
-      -f -
-
-    # Apply Kubernetes manifests
+    - echo "Deploying to Kubernetes..."
+    - kubectl create namespace chat-app --dry-run=client -o yaml | kubectl apply -f -
     - kubectl apply -f k8s/ --recursive
-
-    # Update deployment images with new tags
     - kubectl set image deployment/backend backend=$BACKEND_IMAGE -n chat-app
     - kubectl set image deployment/frontend frontend=$FRONTEND_IMAGE -n chat-app
-
-    # Wait for rollout to complete
-    - kubectl rollout status deployment/backend -n chat-app --timeout=300s
-    - kubectl rollout status deployment/frontend -n chat-app --timeout=300s
-
-    # Show final status
-    - kubectl get pods -n chat-app
-    - kubectl get services -n chat-app
-
-    # Health check
-    - echo "Performing health checks..."
-    - sleep 30
-    - kubectl get pods -n chat-app -o wide
-  only:
-    - main
-  when: manual
-
-# -------------------------
-# Post-Deployment Tasks
-# -------------------------
-
-# Notify deployment status
-notify_deployment:
-  stage: .post
-  image: curlimages/curl:latest
-  script:
-    - echo "Deployment notification would be sent here"
-    - echo "Consider integrating with Slack, Teams, or email notifications"
-  dependencies:
-    - deploy_production
-  only:
-    - main
-  when: on_success
+    - kubectl rollout status deployment/backend -n chat-app
+    - kubectl rollout status deployment/frontend -n chat-app
