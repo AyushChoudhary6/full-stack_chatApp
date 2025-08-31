@@ -33,20 +33,34 @@ build_and_push_frontend:
     - echo "Pushing frontend Docker image..."
     - docker push $FRONTEND_IMAGE
 
+# deploy:
+#   stage: deploy
+#   image: bitnami/kubectl:latest
+#   needs:
+#     - build_and_push_backend
+#     - build_and_push_frontend
+#   script:
+#     - echo "$KUBE_CA_PEM" > ca.pem
+#     - kubectl config set-cluster my-cluster --server="$KUBE_SERVER" --certificate-authority=ca.pem
+#     - kubectl config set-credentials gitlab --token="$KUBE_TOKEN"
+#     - kubectl config set-context my-context --cluster=my-cluster --user=gitlab --namespace="$KUBE_NAMESPACE"
+#     - kubectl config use-context my-context
+#     - kubectl config get-contexts
+#     - echo "Deploying to Kubernetes..."
+#     - kubectl apply -f k8s/
+#     - kubectl set image deployment/backend backend="$BACKEND_IMAGE" -n "$KUBE_NAMESPACE"
+#     - kubectl set image deployment/frontend frontend="$FRONTEND_IMAGE" -n "$KUBE_NAMESPACE"
+#     - kubectl rollout status deployment/backend -n "$KUBE_NAMESPACE"
+#     - kubectl rollout status deployment/frontend -n "$KUBE_NAMESPACE"
 deploy:
   stage: deploy
   image: bitnami/kubectl:latest
-  needs:
-    - build_and_push_backend
-    - build_and_push_frontend
   script:
     - echo "$KUBE_CA_PEM" > ca.pem
     - kubectl config set-cluster my-cluster --server="$KUBE_SERVER" --certificate-authority=ca.pem
     - kubectl config set-credentials gitlab --token="$KUBE_TOKEN"
     - kubectl config set-context my-context --cluster=my-cluster --user=gitlab --namespace="$KUBE_NAMESPACE"
     - kubectl config use-context my-context
-    - kubectl config get-contexts
-    - echo "Deploying to Kubernetes..."
     - kubectl apply -f k8s/
     - kubectl set image deployment/backend backend="$BACKEND_IMAGE" -n "$KUBE_NAMESPACE"
     - kubectl set image deployment/frontend frontend="$FRONTEND_IMAGE" -n "$KUBE_NAMESPACE"
