@@ -1,80 +1,14 @@
-stages:
-  - build
-  - push
-  - deploy
-
-variables:
-  DOCKER_DRIVER: overlay2
-  BACKEND_IMAGE: ayushchoudhary6/chat-app-backend:$CI_COMMIT_SHORT_SHA
-  FRONTEND_IMAGE: ayushchoudhary6/chat-app-frontend:$CI_COMMIT_SHORT_SHA
-
-# -------------------------
-# Build Backend Image
-# -------------------------
-build_backend:
-  stage: build
-  image: docker:20.10.16
-  services:
-    - docker:20.10.16-dind
-  script:
-    - docker build -t $BACKEND_IMAGE ./backend
-    - docker save -o backend.tar $BACKEND_IMAGE
-  artifacts:
-    paths:
-      - backend.tar
-    expire_in: 1h
-  only:
-    - main
-
-# -------------------------
-# Build Frontend Image
-# -------------------------
-build_frontend:
-  stage: build
-  image: docker:20.10.16
-  services:
-    - docker:20.10.16-dind
-  script:
-    - docker build -t $FRONTEND_IMAGE ./frontend
-    - docker save -o frontend.tar $FRONTEND_IMAGE
-  artifacts:
-    paths:
-      - frontend.tar
-    expire_in: 1h
-  only:
-    - main
-
-# -------------------------
-# Push Docker Images to Registry
-# -------------------------
-push_images:
-  stage: push
-  image: docker:20.10.16
-  services:
-    - docker:20.10.16-dind
-  dependencies:
-    - build_backend
-    - build_frontend
-  script:
-    - echo "$CI_DOCKER_PASSWORD" | docker login -u "$CI_DOCKER_USER" --password-stdin
-    - docker load -i backend.tar
-    - docker load -i frontend.tar
-    - docker push $BACKEND_IMAGE
-    - docker push $FRONTEND_IMAGE
-  only:
-    - main
-
 # -------------------------
 # Deploy to Kubernetes via GitLab Agent
 # -------------------------
 deploy:
   stage: deploy
-  image: bitnami/kubectl:latest
+  image: alpine/kubectl:latest  # This image includes shell support
   needs: ["push_images"]
   environment:
     name: production
     kubernetes:
-      namespace: chat-app  # Replace with your actual namespace
+      namespace: chat-app
   script:
     # Ensure namespace exists
     - kubectl get ns chat-app || kubectl create ns chat-app
