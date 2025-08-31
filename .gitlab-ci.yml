@@ -1,15 +1,18 @@
+image: docker:20.10.24   # Use an image with Docker CLI
+services:
+  - docker:20.10.24-dind # Enable Docker-in-Docker daemon
+
+variables:
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
+  BACKEND_IMAGE: $CI_REGISTRY_IMAGE/chat-app-backend:$CI_COMMIT_SHORT_SHA
+  FRONTEND_IMAGE: $CI_REGISTRY_IMAGE/chat-app-frontend:$CI_COMMIT_SHORT_SHA
+
 stages:
   - build
   - push
   - deploy
 
-variables:
-  BACKEND_IMAGE: $CI_REGISTRY_IMAGE/chat-app-backend:$CI_COMMIT_SHORT_SHA
-  FRONTEND_IMAGE: $CI_REGISTRY_IMAGE/chat-app-frontend:$CI_COMMIT_SHORT_SHA
-
-# -------------------------
-# Build Stage
-# -------------------------
 build_backend:
   stage: build
   script:
@@ -22,9 +25,6 @@ build_frontend:
     - echo "Building frontend Docker image..."
     - docker build -t $FRONTEND_IMAGE ./frontend
 
-# -------------------------
-# Push Stage
-# -------------------------
 push_images:
   stage: push
   needs:
@@ -32,21 +32,17 @@ push_images:
     - build_frontend
   script:
     - echo "Logging in to GitLab Container Registry..."
-    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_DOCKER_USER $CI_DOCKER_PASSWORD
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
     - docker push $BACKEND_IMAGE
     - docker push $FRONTEND_IMAGE
 
-# -------------------------
-# Deploy Stage
-# -------------------------
 deploy:
   stage: deploy
   needs:
     - push_images
-
   script:
     - echo "Deploying to Kubernetes..."
-    - kubectl create namespace chat-app --dry-run=client -o yaml | kubectl apply -f 
+    - kubectl create namespace chat-app --dry-run=client -o yaml | kubectl apply -f -
     - kubectl apply -f k8s/ --recursive
     - kubectl set image deployment/backend backend=$BACKEND_IMAGE -n chat-app
     - kubectl set image deployment/frontend frontend=$FRONTEND_IMAGE -n chat-app
