@@ -43,8 +43,7 @@ deploy:
   stage: deploy
   needs:
     - push_images
-  kubernetes:
-    namespace: chat-app
+
   script:
     - echo "Deploying to Kubernetes..."
     - kubectl create namespace chat-app --dry-run=client -o yaml | kubectl apply -f 
