@@ -3,8 +3,8 @@ stages:
   - deploy
 
 variables:
-  BACKEND_IMAGE: $DOCKER_HUB_USER/chat-app-backend:$CI_COMMIT_SHORT_SHA
-  FRONTEND_IMAGE: $DOCKER_HUB_USER/chat-app-frontend:$CI_COMMIT_SHORT_SHA
+  BACKEND_IMAGE: $CI_DOCKER_USER/chat-app-backend:$CI_COMMIT_SHORT_SHA
+  FRONTEND_IMAGE: $CI_DOCKER_USER/chat-app-frontend:$CI_COMMIT_SHORT_SHA
   DOCKER_TLS_CERTDIR: ""
 
 build_and_push_backend:
@@ -14,7 +14,7 @@ build_and_push_backend:
     - docker:20.10.24-dind
   script:
     - echo "Logging in to Docker Hub..."
-    - echo "$DOCKER_HUB_PASSWORD" | docker login -u "$DOCKER_HUB_USER" --password-stdin
+    - echo "$CI_DOCKER_PASSWORD" | docker login -u "$CI_DOCKER_USER" --password-stdin
     - echo "Building backend Docker image..."
     - docker build -t $BACKEND_IMAGE ./backend
     - echo "Pushing backend Docker image..."
