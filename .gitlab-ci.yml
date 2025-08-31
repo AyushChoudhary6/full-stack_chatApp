@@ -3,10 +3,9 @@ stages:
   - deploy
 
 variables:
-  BACKEND_IMAGE: $CI_REGISTRY_IMAGE/chat-app-backend:$CI_COMMIT_SHORT_SHA
-  FRONTEND_IMAGE: $CI_REGISTRY_IMAGE/chat-app-frontend:$CI_COMMIT_SHORT_SHA
+  BACKEND_IMAGE: $DOCKER_HUB_USER/chat-app-backend:$CI_COMMIT_SHORT_SHA
+  FRONTEND_IMAGE: $DOCKER_HUB_USER/chat-app-frontend:$CI_COMMIT_SHORT_SHA
   DOCKER_TLS_CERTDIR: ""
-  CI_REGISTRY: registry.gitlab.com
 
 build_and_push_backend:
   stage: build_and_push
@@ -14,8 +13,8 @@ build_and_push_backend:
   services:
     - docker:20.10.24-dind
   script:
-    - echo "Logging in to GitLab registry..."
-    - echo "$CI_DOCKER_PASSWORD" | docker login -u "$CI_DOCKER_USER" --password-stdin $CI_REGISTRY
+    - echo "Logging in to Docker Hub..."
+    - echo "$DOCKER_HUB_PASSWORD" | docker login -u "$DOCKER_HUB_USER" --password-stdin
     - echo "Building backend Docker image..."
     - docker build -t $BACKEND_IMAGE ./backend
     - echo "Pushing backend Docker image..."
@@ -27,8 +26,8 @@ build_and_push_frontend:
   services:
     - docker:20.10.24-dind
   script:
-    - echo "Logging in to GitLab registry..."
-    - echo "$CI_DOCKER_PASSWORD" | docker login -u "$CI_DOCKER_USER" --password-stdin $CI_REGISTRY
+    - echo "Logging in to Docker Hub..."
+    - echo "$DOCKER_HUB_PASSWORD" | docker login -u "$DOCKER_HUB_USER" --password-stdin
     - echo "Building frontend Docker image..."
     - docker build -t $FRONTEND_IMAGE ./frontend
     - echo "Pushing frontend Docker image..."
