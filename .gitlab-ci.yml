@@ -54,19 +54,15 @@ build_and_push_frontend:
 #     - kubectl rollout status deployment/frontend -n "$KUBE_NAMESPACE"
 deploy:
   stage: deploy
-  image:
-    name: bitnami/kubectl:latest
-    entrypoint: [""]
+  image: bitnami/kubectl:latest
+  variables:
+    KUBECONFIG: /builds/$CI_PROJECT_NAMESPACE/$CI_PROJECT_NAME/.kube/config
   script:
-    - sh -c '
-      echo "$KUBE_CA_PEM" > ca.pem &&
-      kubectl config set-cluster my-cluster --server="$KUBE_SERVER" --certificate-authority=ca.pem &&
-      kubectl config set-credentials gitlab --token="$KUBE_TOKEN" &&
-      kubectl config set-context my-context --cluster=my-cluster --user=gitlab --namespace="$KUBE_NAMESPACE" &&
-      kubectl config use-context my-context &&
-      kubectl apply -f k8s/ &&
-      kubectl set image deployment/backend backend="$BACKEND_IMAGE" -n "$KUBE_NAMESPACE" &&
-      kubectl set image deployment/frontend frontend="$FRONTEND_IMAGE" -n "$KUBE_NAMESPACE" &&
-      kubectl rollout status deployment/backend -n "$KUBE_NAMESPACE" &&
-      kubectl rollout status deployment/frontend -n "$KUBE_NAMESPACE"
-      '
+    - kubectl config set-context gitlab-managed-cluster
+    - kubectl config use-context gitlab-managed-cluster
+    - kubectl apply -f k8s/
+    - kubectl set image deployment/backend backend="$BACKEND_IMAGE" -n "$KUBE_NAMESPACE"
+    - kubectl set image deployment/frontend frontend="$FRONTEND_IMAGE" -n "$KUBE_NAMESPACE"
+    - kubectl rollout status deployment/backend -n "$KUBE_NAMESPACE"
+    - kubectl rollout status deployment/frontend -n "$KUBE_NAMESPACE"
+
