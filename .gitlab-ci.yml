@@ -57,12 +57,16 @@ deploy:
   stage: deploy
   image: alpine:latest
   before_script:
-    - apk add --no-cache curl
+    - apk add --no-cache curl bash
     - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
     - install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+    # Decode certificates and keys from variables
     - echo "$KUBE_CA_PEM" | base64 -d > ca.pem
+    - echo "$KUBE_CLIENT_CERT" | base64 -d > client.crt
+    - echo "$KUBE_CLIENT_KEY" | base64 -d > client.key
+    # Configure kubectl to use certs and cluster info
     - kubectl config set-cluster my-cluster --server="$KUBE_SERVER" --certificate-authority=ca.pem
-    - kubectl config set-credentials gitlab --token="$KUBE_TOKEN"
+    - kubectl config set-credentials gitlab --client-certificate=client.crt --client-key=client.key
     - kubectl config set-context my-context --cluster=my-cluster --user=gitlab --namespace="$KUBE_NAMESPACE"
     - kubectl config use-context my-context
   script:
@@ -71,5 +75,3 @@ deploy:
     - kubectl set image deployment/frontend frontend=$FRONTEND_IMAGE -n $KUBE_NAMESPACE
     - kubectl rollout status deployment/backend -n $KUBE_NAMESPACE
     - kubectl rollout status deployment/frontend -n $KUBE_NAMESPACE
-
-
