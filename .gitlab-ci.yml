@@ -14,13 +14,13 @@ build_backend:
   stage: build
   script:
     - echo "Building backend Docker image..."
-    - Docker build -t $BACKEND_IMAGE ./backend
+    - docker build -t $BACKEND_IMAGE ./backend
 
 build_frontend:
   stage: build
   script:
     - echo "Building frontend Docker image..."
-    - Docker build -t $FRONTEND_IMAGE ./frontend
+    - docker build -t $FRONTEND_IMAGE ./frontend
 
 # -------------------------
 # Push Stage
@@ -32,9 +32,9 @@ push_images:
     - build_frontend
   script:
     - echo "Logging in to GitLab Container Registry..."
-    - echo $CI_REGISTRY_PASSWORD | Docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
-    - Docker push $BACKEND_IMAGE
-    - Docker push $FRONTEND_IMAGE
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_DOCKER_USER $CI_DOCKER_PASSWORD
+    - docker push $BACKEND_IMAGE
+    - docker push $FRONTEND_IMAGE
 
 # -------------------------
 # Deploy Stage
@@ -43,14 +43,11 @@ deploy:
   stage: deploy
   needs:
     - push_images
-  environment:
-    name: development
-    url: https://dev-chat-app.example.com
-    kubernetes:
-      namespace: chat-app
+  kubernetes:
+    namespace: chat-app
   script:
     - echo "Deploying to Kubernetes..."
-    - kubectl create namespace chat-app --dry-run=client -o yaml | kubectl apply -f -
+    - kubectl create namespace chat-app --dry-run=client -o yaml | kubectl apply -f 
     - kubectl apply -f k8s/ --recursive
     - kubectl set image deployment/backend backend=$BACKEND_IMAGE -n chat-app
     - kubectl set image deployment/frontend frontend=$FRONTEND_IMAGE -n chat-app
