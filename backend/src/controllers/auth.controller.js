@@ -1,7 +1,6 @@
 import { generateToken } from "../lib/utils.js";
 import User from "../models/user.model.js";
 import bcrypt from "bcryptjs";
-import cloudinary from "../lib/cloudinary.js";
 
 export const signup = async (req, res) => {
   const { fullName, email, password } = req.body;
@@ -14,14 +13,14 @@ export const signup = async (req, res) => {
       return res.status(400).json({ message: "Password must be at least 6 characters" });
     }
 
-    const user = await User.findOne({ email });
+    const existingUser = await User.findByEmail(email);
 
-    if (user) return res.status(400).json({ message: "Email already exists" });
+    if (existingUser) return res.status(400).json({ message: "Email already exists" });
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    const newUser = new User({
+    const newUser = await User.create({
       fullName,
       email,
       password: hashedPassword,
@@ -29,14 +28,13 @@ export const signup = async (req, res) => {
 
     if (newUser) {
       // generate jwt token here
-      generateToken(newUser._id, res);
-      await newUser.save();
+      generateToken(newUser.id, res);
 
       res.status(201).json({
-        _id: newUser._id,
-        fullName: newUser.fullName,
+        id: newUser.id,
+        fullName: newUser.fullname,
         email: newUser.email,
-        profilePic: newUser.profilePic,
+        profilePic: newUser.profile_pic,
       });
     } else {
       res.status(400).json({ message: "Invalid user data" });
@@ -50,7 +48,7 @@ export const signup = async (req, res) => {
 export const login = async (req, res) => {
   const { email, password } = req.body;
   try {
-    const user = await User.findOne({ email });
+    const user = await User.findByEmail(email);
 
     if (!user) {
       return res.status(400).json({ message: "Invalid credentials" });
@@ -61,13 +59,13 @@ export const login = async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    generateToken(user._id, res);
+    generateToken(user.id, res);
 
     res.status(200).json({
-      _id: user._id,
-      fullName: user.fullName,
+      id: user.id,
+      fullName: user.fullname,
       email: user.email,
-      profilePic: user.profilePic,
+      profilePic: user.profile_pic,
     });
   } catch (error) {
     console.log("Error in login controller", error.message);
@@ -88,18 +86,15 @@ export const logout = (req, res) => {
 export const updateProfile = async (req, res) => {
   try {
     const { profilePic } = req.body;
-    const userId = req.user._id;
+    const userId = req.user.id;
 
     if (!profilePic) {
       return res.status(400).json({ message: "Profile pic is required" });
     }
 
-    const uploadResponse = await cloudinary.uploader.upload(profilePic);
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { profilePic: uploadResponse.secure_url },
-      { new: true }
-    );
+    // For now, just store the base64 string directly
+    // In production, you'd want to use a proper file storage service
+    const updatedUser = await User.updateProfilePic(userId, profilePic);
 
     res.status(200).json(updatedUser);
   } catch (error) {

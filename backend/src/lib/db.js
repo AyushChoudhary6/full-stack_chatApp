@@ -1,9 +1,12 @@
-import mongoose from "mongoose";
+import pkg from 'pg';
+const { Pool } = pkg;
+
+let pool;
 
 export const connectDB = async () => {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) {
-    console.log('MongoDB connection error: MONGODB_URI environment variable is required');
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    console.log('PostgreSQL connection error: DATABASE_URL environment variable is required');
     process.exit(1);
   }
 
@@ -14,22 +17,73 @@ export const connectDB = async () => {
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const conn = await mongoose.connect(uri, {
-        // Additional options for better connection handling
-        maxPoolSize: 10,
-        serverSelectionTimeoutMS: 5000,
-        socketTimeoutMS: 45000,
+      pool = new Pool({
+        connectionString: databaseUrl,
+        max: 10,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 5000,
       });
 
-      console.log(`MongoDB connected: ${conn.connection.host}`);
-      return conn;
+      // Test the connection
+      const client = await pool.connect();
+      console.log(`PostgreSQL connected: ${client.host || 'localhost'}`);
+      client.release();
+      
+      // Create tables if they don't exist
+      await createTables();
+      
+      return pool;
     } catch (error) {
-      console.log(`MongoDB connection attempt ${attempt} failed: ${error.message}`);
+      console.log(`PostgreSQL connection attempt ${attempt} failed: ${error.message}`);
       if (attempt === maxAttempts) {
-        console.log('MongoDB connection error: exceeded maximum retries');
+        console.log('PostgreSQL connection error: exceeded maximum retries');
         process.exit(1);
       }
       await delay(retryDelayMs);
     }
   }
+};
+
+const createTables = async () => {
+  const client = await pool.connect();
+  try {
+    // Create users table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        fullname VARCHAR(255) NOT NULL,
+        password VARCHAR(255) NOT NULL,
+        profile_pic TEXT DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Create messages table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS messages (
+        id SERIAL PRIMARY KEY,
+        sender_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        receiver_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        text TEXT,
+        image TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    console.log('Database tables created successfully');
+  } catch (error) {
+    console.error('Error creating tables:', error);
+  } finally {
+    client.release();
+  }
+};
+
+export const getDB = () => {
+  if (!pool) {
+    throw new Error('Database not initialized. Call connectDB first.');
+  }
+  return pool;
 };
