@@ -1,58 +1,77 @@
 stages:
-  - build
-  - push
+  - build_and_push
   - deploy
 
 variables:
-  DOCKER_DRIVER: overlay2
-  BACKEND_IMAGE: ayushchoudhary6/chat-app-backend:$CI_COMMIT_SHORT_SHA
-  FRONTEND_IMAGE: ayushchoudhary6/chat-app-frontend:$CI_COMMIT_SHORT_SHA
+  BACKEND_IMAGE: $CI_DOCKER_USER/chat-app-backend:$CI_COMMIT_SHORT_SHA
+  FRONTEND_IMAGE: $CI_DOCKER_USER/chat-app-frontend:$CI_COMMIT_SHORT_SHA
+  DOCKER_TLS_CERTDIR: ""
+  KUBE_SERVER: https://127.0.0.1:38621
 
-# Build Backend
-build_backend:
-  stage: build
+build_and_push_backend:
+  stage: build_and_push
+  image: docker:20.10.24
+  services:
+    - docker:20.10.24-dind
   script:
+    - echo "Logging in to Docker Hub..."
+    - echo "$CI_DOCKER_PASSWORD" | docker login -u "$CI_DOCKER_USER" --password-stdin
+    - echo "Building backend Docker image..."
     - docker build -t $BACKEND_IMAGE ./backend
-  only:
-    - main
-
-# Build Frontend
-build_frontend:
-  stage: build
-  script:
-    - docker build -t $FRONTEND_IMAGE ./frontend
-  only:
-    - main
-
-# Push Images
-push_images:
-  stage: push
-  script:
-    - docker login -u $CI_DOCKER_USER -p $CI_DOCKER_PASSWORD
+    - echo "Pushing backend Docker image..."
     - docker push $BACKEND_IMAGE
-    - docker push $FRONTEND_IMAGE
-  needs:
-    - build_backend
-    - build_frontend
-  only:
-    - main
 
-# Deploy to K8s
+build_and_push_frontend:
+  stage: build_and_push
+  image: docker:20.10.24
+  services:
+    - docker:20.10.24-dind
+  script:
+    - echo "Logging in to Docker Hub..."
+    - echo "$CI_DOCKER_PASSWORD" | docker login -u "$CI_DOCKER_USER" --password-stdin
+    - echo "Building frontend Docker image..."
+    - docker build -t $FRONTEND_IMAGE ./frontend
+    - echo "Pushing frontend Docker image..."
+    - docker push $FRONTEND_IMAGE
+
+# deploy:
+#   stage: deploy
+#   image: bitnami/kubectl:latest
+#   needs:
+#     - build_and_push_backend
+#     - build_and_push_frontend
+#   script:
+#     - echo "$KUBE_CA_PEM" > ca.pem
+#     - kubectl config set-cluster my-cluster --server="$KUBE_SERVER" --certificate-authority=ca.pem
+#     - kubectl config set-credentials gitlab --token="$KUBE_TOKEN"
+#     - kubectl config set-context my-context --cluster=my-cluster --user=gitlab --namespace="$KUBE_NAMESPACE"
+#     - kubectl config use-context my-context
+#     - kubectl config get-contexts
+#     - echo "Deploying to Kubernetes..."
+#     - kubectl apply -f k8s/
+#     - kubectl set image deployment/backend backend="$BACKEND_IMAGE" -n "$KUBE_NAMESPACE"
+#     - kubectl set image deployment/frontend frontend="$FRONTEND_IMAGE" -n "$KUBE_NAMESPACE"
+#     - kubectl rollout status deployment/backend -n "$KUBE_NAMESPACE"
+#     - kubectl rollout status deployment/frontend -n "$KUBE_NAMESPACE"
 deploy:
   stage: deploy
-  image: bitnami/kubectl:latest
+  image: alpine:latest
   before_script:
-    - kubectl config set-cluster my-cluster --server=$KUBE_SERVER --certificate-authority=$KUBE_CA_PEM
-    - kubectl config set-credentials gitlab --token=$KUBE_TOKEN
-    - kubectl config set-context gitlab --cluster=my-cluster --user=gitlab --namespace=$KUBE_NAMESPACE
-    - kubectl config use-context gitlab
+    - apk add --no-cache curl bash
+    - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    - install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+    # Decode certificates and keys from variables
+    - echo "$KUBE_CA_PEM" | base64 -d > ca.pem
+    - echo "$KUBE_CLIENT_CERT" | base64 -d > client.crt
+    - echo "$KUBE_CLIENT_KEY" | base64 -d > client.key
+    # Configure kubectl to use certs and cluster info
+    - kubectl config set-cluster my-cluster --server="$KUBE_SERVER" --insecure-skip-tls-verify=true
+    - kubectl config set-credentials gitlab --client-certificate=client.crt --client-key=client.key
+    - kubectl config set-context my-context --cluster=my-cluster --user=gitlab --namespace="$KUBE_NAMESPACE"
+    - kubectl config use-context my-context
   script:
-    - kubectl apply -f k8s/
+    - kubectl apply --validate=false -f k8s/
     - kubectl set image deployment/backend backend=$BACKEND_IMAGE -n $KUBE_NAMESPACE
     - kubectl set image deployment/frontend frontend=$FRONTEND_IMAGE -n $KUBE_NAMESPACE
     - kubectl rollout status deployment/backend -n $KUBE_NAMESPACE
     - kubectl rollout status deployment/frontend -n $KUBE_NAMESPACE
-  only:
-    - main
-
-
