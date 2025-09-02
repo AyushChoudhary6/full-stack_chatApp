@@ -22,14 +22,20 @@ spec:
             - containerPort: 5432
           env:
             - name: POSTGRES_DB
-              value: "chatapp"
+              valueFrom:
+                configMapKeyRef:
+                  name: chatapp-config
+                  key: POSTGRES_DB
             - name: POSTGRES_USER
-              value: "chatapp_user"
+              valueFrom:
+                configMapKeyRef:
+                  name: chatapp-config
+                  key: POSTGRES_USER
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: app-secrets
-                  key: postgres-password
+                  name: chatapp-secrets
+                  key: POSTGRES_PASSWORD
           volumeMounts:
             - name: postgres-storage
               mountPath: /var/lib/postgresql/data

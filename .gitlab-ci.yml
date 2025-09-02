@@ -1,12 +1,13 @@
 # =============================================================================
-# GitLab CI/CD Pipeline for Local Chat Application
+# GitLab CI/CD Pipeline for Full-Stack Chat Application
 # =============================================================================
-# PostgreSQL database, GitLab Container Registry, local deployment with GitLab Runner
+# Docker + Kubernetes deployment with PostgreSQL and GitLab Container Registry
 
 stages:
   - test
   - build
-  - deploy
+  - deploy-docker
+  - deploy-k8s
 
 variables:
   # Docker configuration
@@ -20,6 +21,10 @@ variables:
   # Database configuration
   POSTGRES_DB: chatapp
   POSTGRES_USER: chatapp_user
+  
+  # Kubernetes configuration
+  KUBE_NAMESPACE: chatapp
+  KUBE_CONTEXT: default
 
 # =============================================================================
 # TEST STAGE
@@ -97,11 +102,11 @@ build_frontend_image:
     - if: $CI_COMMIT_BRANCH == "develop"
 
 # =============================================================================
-# DEPLOY STAGE - Pull from Registry and Deploy
+# DEPLOY STAGE - Docker Compose (Development/Testing)
 # =============================================================================
 
-deploy_local:
-  stage: deploy
+deploy_docker:
+  stage: deploy-docker
   image: docker:24.0.5
   services:
     - docker:24.0.5-dind
@@ -176,17 +181,109 @@ deploy_local:
     - docker-compose -f docker-compose.prod.yml ps
     
     # Display service URLs
-    - echo "Deployment completed successfully!"
+    - echo "Docker Deployment completed successfully!"
     - echo "Frontend available at http://localhost:3000"
     - echo "Backend API available at http://localhost:5000"
     - echo "PostgreSQL available at localhost:5432"
-    - echo "Health Check available at http://localhost:5000/health"
     
   environment:
-    name: local
+    name: docker-local
+    url: http://localhost:3000
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+  allow_failure: false
+
+# =============================================================================
+# DEPLOY STAGE - Kubernetes (Production)
+# =============================================================================
+
+deploy_kubernetes:
+  stage: deploy-k8s
+  image: bitnami/kubectl:latest
+  before_script:
+    # Install kubectl and other tools
+    - apk add --no-cache curl bash
+    # Create kubectl config directory
+    - mkdir -p ~/.kube
+    # Setup kubeconfig (assuming you have a local cluster)
+    - echo "Setting up kubectl for local cluster..."
+  script:
+    # Create namespace if it doesn't exist
+    - kubectl create namespace $KUBE_NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Create ConfigMap for environment variables
+    - |
+      cat > configmap.yaml << EOF
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: chatapp-config
+        namespace: $KUBE_NAMESPACE
+      data:
+        POSTGRES_DB: "${POSTGRES_DB}"
+        POSTGRES_USER: "${POSTGRES_USER}"
+        NODE_ENV: "production"
+        PORT: "5000"
+      EOF
+    - kubectl apply -f configmap.yaml
+    
+    # Create Secret for sensitive data
+    - |
+      cat > secret.yaml << EOF
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: chatapp-secrets
+        namespace: $KUBE_NAMESPACE
+      type: Opaque
+      data:
+        POSTGRES_PASSWORD: $(echo -n "${POSTGRES_PASSWORD}" | base64)
+        JWT_SECRET: $(echo -n "${JWT_SECRET}" | base64)
+        DATABASE_URL: $(echo -n "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-service:5432/${POSTGRES_DB}" | base64)
+      EOF
+    - kubectl apply -f secret.yaml
+    
+    # Update Kubernetes manifests with new image tags
+    - sed -i "s|BACKEND_IMAGE_PLACEHOLDER|${BACKEND_IMAGE}|g" k8s/backend-deployment.yml
+    - sed -i "s|FRONTEND_IMAGE_PLACEHOLDER|${FRONTEND_IMAGE}|g" k8s/frontend-deployment.yml
+    
+    # Deploy PostgreSQL
+    - kubectl apply -f k8s/postgres-deployment.yml
+    
+    # Deploy Backend
+    - kubectl apply -f k8s/backend-deployment.yml
+    - kubectl apply -f k8s/backend-service.yml
+    
+    # Deploy Frontend
+    - kubectl apply -f k8s/frontend-deployment.yml
+    - kubectl apply -f k8s/frontend-service.yml
+    
+    # Apply Ingress (if available)
+    - kubectl apply -f k8s/ingress.yml || echo "Ingress not applied - may not be needed for local setup"
+    
+    # Wait for deployments
+    - echo "Waiting for deployments to be ready..."
+    - kubectl wait --for=condition=available --timeout=300s deployment/postgres-deployment -n $KUBE_NAMESPACE
+    - kubectl wait --for=condition=available --timeout=300s deployment/backend-deployment -n $KUBE_NAMESPACE
+    - kubectl wait --for=condition=available --timeout=300s deployment/frontend-deployment -n $KUBE_NAMESPACE
+    
+    # Get service information
+    - echo "Kubernetes Deployment completed!"
+    - echo "Services:"
+    - kubectl get services -n $KUBE_NAMESPACE
+    - echo "Pods:"
+    - kubectl get pods -n $KUBE_NAMESPACE
+    - echo "To access the application:"
+    - echo "Frontend port-forward command kubectl port-forward service/frontend-service 3000:80 -n $KUBE_NAMESPACE"
+    - echo "Backend port-forward command kubectl port-forward service/backend-service 5000:5000 -n $KUBE_NAMESPACE"
+    
+  environment:
+    name: kubernetes-local
     url: http://localhost:3000
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
-      when: manual
     - if: $CI_COMMIT_BRANCH == "develop"
+      when: manual
   allow_failure: false
