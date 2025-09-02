@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: chatapp
+data:
+  NODE_ENV: "production"
+  PORT: "5000"
+  FRONTEND_PORT: "80"
+  LOG_LEVEL: "info"
+  POSTGRES_DB: "chatapp"
+  POSTGRES_USER: "chatapp_user"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+  namespace: chatapp
+type: Opaque
+# This is a placeholder - actual secrets will be created by the CI/CD pipeline
+# with real values from GitLab variables
+data:
+  database-url: ""
+  jwt-secret: ""
+  postgres-password: ""

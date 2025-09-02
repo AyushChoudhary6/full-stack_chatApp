@@ -6,7 +6,7 @@ metadata:
   labels:
     app: backend
 spec:
-  replicas: 3
+  replicas: 2
   selector:
     matchLabels:
       app: backend
@@ -17,18 +17,44 @@ spec:
     spec:
       containers: 
         - name: backend
-          image: ayushchoudhary6/chat-backend:latest
+          image: chat-app-backend:latest
           ports:
             - containerPort: 5000
           env:
-            - name: MONGODB_URI
-              value: "mongodb+srv://ayushrjchoudhary2005:RuAICLXhtgoSTUOP@cluster0.b1nldtm.mongodb.net/mydatabase?retryWrites=true&w=majority&authSource=admin"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: database-url
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: jwt-secret
             - name: PORT
               value: "5000"
+            - name: NODE_ENV
+              value: "production"
           resources:
             requests:
               memory: "128Mi"
               cpu: "250m"
             limits:
-              memory: "256Mi"
+              memory: "512Mi"
               cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3

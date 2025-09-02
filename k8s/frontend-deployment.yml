@@ -6,7 +6,7 @@ metadata:
   labels:
     app: frontend
 spec:
-  replicas: 3
+  replicas: 2
   selector:
     matchLabels:
       app: frontend
@@ -17,17 +17,33 @@ spec:
     spec:
       containers: 
         - name: frontend
-          image: ayushchoudhary6/chat-frontend:latest
+          image: chat-app-frontend:latest
           ports:
             - containerPort: 80
           env:
-            - name: frontend-app
-              value: http://frontend:80
+            - name: REACT_APP_BACKEND_URL
+              value: "http://backend-service:5000"
           resources:
             requests:
-              memory: "128Mi"
+              memory: "64Mi"
               cpu: "100m"
             limits:
               memory: "256Mi"
               cpu: "250m"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
           

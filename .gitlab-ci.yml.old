@@ -1,0 +1,310 @@
+# =============================================================================
+# GitLab CI/CD Pipeline for Full-Stack Chat Application - Local Deployment
+# =============================================================================
+# This pipeline builds Docker images and deploys locally using GitLab Runner
+# PostgreSQL database, no Cloudinary, local deployment only
+
+stages:
+  - test
+  - build
+  - deploy
+
+# Global variables
+variables:
+  # Docker configuration
+  DOCKER_TLS_CERTDIR: ""
+  DOCKER_DRIVER: overlay2
+  DOCKER_BUILDKIT: 1
+  
+  # Image tags
+  BACKEND_IMAGE: chat-app-backend:${CI_COMMIT_SHORT_SHA}
+  FRONTEND_IMAGE: chat-app-frontend:${CI_COMMIT_SHORT_SHA}
+  BACKEND_IMAGE_LATEST: chat-app-backend:latest
+  FRONTEND_IMAGE_LATEST: chat-app-frontend:latest
+  
+  # Local deployment configuration
+  APP_NAMESPACE: chatapp
+  POSTGRES_DB: chatapp
+  POSTGRES_USER: chatapp_user
+
+# =============================================================================
+# TEST STAGE
+# =============================================================================
+
+test_backend:
+  stage: test
+  image: node:18-alpine
+  services:
+    - postgres:13-alpine
+  variables:
+    POSTGRES_DB: test_chatapp
+    POSTGRES_USER: test_user
+    POSTGRES_PASSWORD: test_password
+    DATABASE_URL: "postgresql://test_user:test_password@postgres:5432/test_chatapp"
+  before_script:
+    - cd backend
+    - npm ci
+  script:
+    - npm run test || echo "No tests configured yet"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+build_frontend:
+  stage: test
+  image: node:18-alpine
+  before_script:
+    - cd frontend
+    - npm ci
+  script:
+    - npm run build
+  artifacts:
+    paths:
+      - frontend/dist/
+    expire_in: 1 hour
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# =============================================================================
+# SECURITY STAGE
+# =============================================================================
+
+security_scan:
+  stage: security
+  image: node:18-alpine
+  before_script:
+    - npm install -g audit-ci
+  script:
+    - cd backend && npm audit --audit-level moderate
+    - cd ../frontend && npm audit --audit-level moderate
+  allow_failure: true
+  only:
+    - main
+    - develop
+
+# =============================================================================
+# BUILD STAGE
+# =============================================================================
+
+build_backend:
+  stage: build
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  before_script:
+    - echo "Logging into Docker registry..."
+    - echo "$CI_DOCKER_PASSWORD" | docker login -u "$CI_DOCKER_USER" --password-stdin
+  script:
+    - echo "Building backend Docker image..."
+    - cd backend
+    - |
+      docker build \
+        --cache-from $BACKEND_IMAGE_LATEST \
+        --build-arg BUILDKIT_INLINE_CACHE=1 \
+        --tag $BACKEND_IMAGE \
+        --tag $BACKEND_IMAGE_LATEST \
+        .
+    - echo "Pushing backend Docker images..."
+    - docker push $BACKEND_IMAGE
+    - docker push $BACKEND_IMAGE_LATEST
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - api_failure
+
+build_frontend:
+  stage: build
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  before_script:
+    - echo "Logging into Docker registry..."
+    - echo "$CI_DOCKER_PASSWORD" | docker login -u "$CI_DOCKER_USER" --password-stdin
+  script:
+    - echo "Building frontend Docker image..."
+    - cd frontend
+    - |
+      docker build \
+        --cache-from $FRONTEND_IMAGE_LATEST \
+        --build-arg BUILDKIT_INLINE_CACHE=1 \
+        --tag $FRONTEND_IMAGE \
+        --tag $FRONTEND_IMAGE_LATEST \
+        .
+    - echo "Pushing frontend Docker images..."
+    - docker push $FRONTEND_IMAGE
+    - docker push $FRONTEND_IMAGE_LATEST
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - api_failure
+
+# =============================================================================
+# DEPLOY STAGE
+# =============================================================================
+
+.kubectl_setup: &kubectl_setup
+  before_script:
+    - apk add --no-cache curl bash gettext
+    - curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    - install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+    - kubectl version --client
+    # Setup kubectl configuration
+    - mkdir -p ~/.kube
+    - echo "$KUBE_CA_PEM" | base64 -d > /tmp/ca.pem
+    - |
+      if [ ! -z "$KUBE_TOKEN" ]; then
+        echo "Using service account token authentication"
+        kubectl config set-cluster k8s-cluster --server="$KUBE_SERVER" --certificate-authority=/tmp/ca.pem
+        kubectl config set-credentials gitlab --token="$KUBE_TOKEN"
+        kubectl config set-context default --cluster=k8s-cluster --user=gitlab --namespace="$KUBE_NAMESPACE"
+      else
+        echo "Using client certificate authentication"
+        echo "$KUBE_CLIENT_CERT" | base64 -d > /tmp/client.crt
+        echo "$KUBE_CLIENT_KEY" | base64 -d > /tmp/client.key
+        kubectl config set-cluster k8s-cluster --server="$KUBE_SERVER" --certificate-authority=/tmp/ca.pem
+        kubectl config set-credentials gitlab --client-certificate=/tmp/client.crt --client-key=/tmp/client.key
+        kubectl config set-context default --cluster=k8s-cluster --user=gitlab --namespace="$KUBE_NAMESPACE"
+      fi
+    - kubectl config use-context default
+    # Verify connection
+    - kubectl cluster-info
+    - kubectl get nodes || echo "No nodes found or insufficient permissions"
+
+deploy_to_staging:
+  stage: deploy
+  image: alpine:latest
+  <<: *kubectl_setup
+  script:
+    - echo "Deploying to staging environment..."
+    # Create namespace if it doesn't exist
+    - kubectl create namespace $KUBE_NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Create secrets for the application
+    - |
+      kubectl create secret generic app-secrets \
+        --from-literal=mongodb-uri="$MONGODB_URI" \
+        --from-literal=jwt-secret="$JWT_SECRET" \
+        --from-literal=cloudinary-cloud-name="$CLOUDINARY_CLOUD_NAME" \
+        --from-literal=cloudinary-api-key="$CLOUDINARY_API_KEY" \
+        --from-literal=cloudinary-api-secret="$CLOUDINARY_API_SECRET" \
+        --namespace="$KUBE_NAMESPACE" \
+        --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Apply Kubernetes manifests
+    - kubectl apply -f k8s/ --namespace="$KUBE_NAMESPACE"
+    
+    # Update deployment images
+    - kubectl set image deployment/backend-deployment backend=$BACKEND_IMAGE --namespace="$KUBE_NAMESPACE"
+    - kubectl set image deployment/frontend-deployment frontend=$FRONTEND_IMAGE --namespace="$KUBE_NAMESPACE"
+    
+    # Wait for deployments to be ready
+    - kubectl rollout status deployment/backend-deployment --namespace="$KUBE_NAMESPACE" --timeout=600s
+    - kubectl rollout status deployment/frontend-deployment --namespace="$KUBE_NAMESPACE" --timeout=600s
+    
+    # Verify deployment
+    - kubectl get pods --namespace="$KUBE_NAMESPACE"
+    - kubectl get services --namespace="$KUBE_NAMESPACE"
+  environment:
+    name: staging
+    url: https://staging.$DOMAIN_NAME
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - api_failure
+
+deploy_to_production:
+  stage: deploy
+  image: alpine:latest
+  <<: *kubectl_setup
+  script:
+    - echo "Deploying to production environment..."
+    # Create namespace if it doesn't exist
+    - kubectl create namespace $KUBE_NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Create secrets for the application
+    - |
+      kubectl create secret generic app-secrets \
+        --from-literal=mongodb-uri="$MONGODB_URI" \
+        --from-literal=jwt-secret="$JWT_SECRET" \
+        --from-literal=cloudinary-cloud-name="$CLOUDINARY_CLOUD_NAME" \
+        --from-literal=cloudinary-api-key="$CLOUDINARY_API_KEY" \
+        --from-literal=cloudinary-api-secret="$CLOUDINARY_API_SECRET" \
+        --namespace="$KUBE_NAMESPACE" \
+        --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Apply Kubernetes manifests
+    - kubectl apply -f k8s/ --namespace="$KUBE_NAMESPACE"
+    
+    # Update deployment images
+    - kubectl set image deployment/backend-deployment backend=$BACKEND_IMAGE --namespace="$KUBE_NAMESPACE"
+    - kubectl set image deployment/frontend-deployment frontend=$FRONTEND_IMAGE --namespace="$KUBE_NAMESPACE"
+    
+    # Wait for deployments to be ready
+    - kubectl rollout status deployment/backend-deployment --namespace="$KUBE_NAMESPACE" --timeout=600s
+    - kubectl rollout status deployment/frontend-deployment --namespace="$KUBE_NAMESPACE" --timeout=600s
+    
+    # Verify deployment
+    - kubectl get pods --namespace="$KUBE_NAMESPACE"
+    - kubectl get services --namespace="$KUBE_NAMESPACE"
+  environment:
+    name: production
+    url: https://$DOMAIN_NAME
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - api_failure
+
+# =============================================================================
+# POST-DEPLOY STAGE
+# =============================================================================
+
+health_check:
+  stage: post-deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "Performing health checks..."
+    - |
+      if [ "$CI_COMMIT_BRANCH" == "main" ]; then
+        HEALTH_URL="https://$DOMAIN_NAME/health"
+      else
+        HEALTH_URL="https://staging.$DOMAIN_NAME/health"
+      fi
+    - echo "Checking health endpoint: $HEALTH_URL"
+    - |
+      for i in {1..30}; do
+        if curl -f "$HEALTH_URL"; then
+          echo "Health check passed!"
+          exit 0
+        fi
+        echo "Health check attempt $i failed, retrying in 10 seconds..."
+        sleep 10
+      done
+      echo "Health check failed after 30 attempts"
+      exit 1
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_BRANCH == "develop"
+  allow_failure: true

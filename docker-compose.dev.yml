@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:13-alpine
+    environment:
+      POSTGRES_DB: chatapp
+      POSTGRES_USER: chatapp_user
+      POSTGRES_PASSWORD: chatapp_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - chatapp-network
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql://chatapp_user:chatapp_password@postgres:5432/chatapp
+      JWT_SECRET: your_jwt_secret_key_here_32_chars_min
+      PORT: 5000
+      NODE_ENV: development
+    ports:
+      - "5000:5000"
+    depends_on:
+      - postgres
+    networks:
+      - chatapp-network
+    volumes:
+      - ./backend:/app
+    command: npm run dev
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - chatapp-network
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - REACT_APP_BACKEND_URL=http://localhost:5000
+
+volumes:
+  postgres_data:
+
+networks:
+  chatapp-network:
+    driver: bridge
