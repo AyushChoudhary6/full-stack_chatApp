@@ -1,7 +1,7 @@
 # =============================================================================
 # GitLab CI/CD Pipeline for Local Chat Application
 # =============================================================================
-# PostgreSQL database, no Cloudinary, local deployment with GitLab Runner
+# PostgreSQL database, GitLab Container Registry, local deployment with GitLab Runner
 
 stages:
   - test
@@ -13,9 +13,9 @@ variables:
   DOCKER_TLS_CERTDIR: ""
   DOCKER_DRIVER: overlay2
   
-  # Local image tags (no registry push needed)
-  BACKEND_IMAGE: "chat-app-backend:${CI_COMMIT_SHORT_SHA}"
-  FRONTEND_IMAGE: "chat-app-frontend:${CI_COMMIT_SHORT_SHA}"
+  # GitLab Container Registry images
+  BACKEND_IMAGE: "${CI_REGISTRY_IMAGE}/backend:${CI_COMMIT_SHORT_SHA}"
+  FRONTEND_IMAGE: "${CI_REGISTRY_IMAGE}/frontend:${CI_COMMIT_SHORT_SHA}"
   
   # Database configuration
   POSTGRES_DB: chatapp
@@ -61,7 +61,7 @@ build_frontend:
     - if: $CI_COMMIT_BRANCH == "develop"
 
 # =============================================================================
-# BUILD STAGE - Local Docker Images
+# BUILD STAGE - Docker Images with Registry Push
 # =============================================================================
 
 build_backend_image:
@@ -69,9 +69,13 @@ build_backend_image:
   image: docker:24.0.5
   services:
     - docker:24.0.5-dind
+  before_script:
+    # Login to GitLab Container Registry
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
   script:
     - cd backend
     - docker build -t $BACKEND_IMAGE .
+    - docker push $BACKEND_IMAGE
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "develop"
@@ -81,15 +85,19 @@ build_frontend_image:
   image: docker:24.0.5
   services:
     - docker:24.0.5-dind
+  before_script:
+    # Login to GitLab Container Registry
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
   script:
     - cd frontend
     - docker build -t $FRONTEND_IMAGE .
+    - docker push $FRONTEND_IMAGE
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
     - if: $CI_COMMIT_BRANCH == "develop"
 
 # =============================================================================
-# DEPLOY STAGE - Local Docker Compose
+# DEPLOY STAGE - Pull from Registry and Deploy
 # =============================================================================
 
 deploy_local:
@@ -98,11 +106,17 @@ deploy_local:
   services:
     - docker:24.0.5-dind
   before_script:
+    # Login to GitLab Container Registry
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
     # Install docker-compose
     - apk add --no-cache curl
     - curl -L "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64" -o /usr/local/bin/docker-compose
     - chmod +x /usr/local/bin/docker-compose
   script:
+    # Pull the images from registry
+    - docker pull $BACKEND_IMAGE
+    - docker pull $FRONTEND_IMAGE
+    
     # Create docker-compose.yml for local deployment
     - |
       cat > docker-compose.prod.yml << EOF
@@ -119,6 +133,11 @@ deploy_local:
             - postgres_data:/var/lib/postgresql/data
           ports:
             - "5432:5432"
+          healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
         
         backend:
           image: ${BACKEND_IMAGE}
@@ -130,7 +149,9 @@ deploy_local:
           ports:
             - "5000:5000"
           depends_on:
-            - postgres
+            postgres:
+              condition: service_healthy
+          restart: unless-stopped
         
         frontend:
           image: ${FRONTEND_IMAGE}
@@ -138,6 +159,7 @@ deploy_local:
             - "3000:80"
           depends_on:
             - backend
+          restart: unless-stopped
       
       volumes:
         postgres_data:
@@ -154,10 +176,11 @@ deploy_local:
     - docker-compose -f docker-compose.prod.yml ps
     
     # Display service URLs
-    - echo "Deployment completed!"
-    # - echo "Frontend available at: http://localhost:3000"
-    # - echo "Backend available at: http://localhost:5000"
-    # - echo "PostgreSQL available at: localhost:5432"
+    - echo "Deployment completed successfully!"
+    - echo "Frontend available at http://localhost:3000"
+    - echo "Backend API available at http://localhost:5000"
+    - echo "PostgreSQL available at localhost:5432"
+    - echo "Health Check available at http://localhost:5000/health"
     
   environment:
     name: local
