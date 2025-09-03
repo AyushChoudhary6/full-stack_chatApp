@@ -113,7 +113,7 @@ build_frontend_image:
 
 deploy_production:
   stage: deploy
-  image: bitnami/kubectl:latest
+  image: bitnami/kubectl:1.14 
   before_script:
     # Setup kubectl for local Kubernetes cluster
     - mkdir -p ~/.kube
