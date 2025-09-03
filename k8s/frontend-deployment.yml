@@ -9,11 +9,11 @@ spec:
   replicas: 2
   selector:
     matchLabels:
-      app: frontend
+      app: chat-app-frontend
   template:
     metadata:
       labels:
-        app: frontend
+        app: chat-app-frontend
     spec:
       containers: 
         - name: frontend
@@ -22,7 +22,7 @@ spec:
             - containerPort: 80
           env:
             - name: REACT_APP_BACKEND_URL
-              value: "http://backend-service:5000"
+              value: "http://backend:5000"
           resources:
             requests:
               memory: "64Mi"
