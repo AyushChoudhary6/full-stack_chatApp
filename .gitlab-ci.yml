@@ -162,49 +162,45 @@ deploy_production:
     
     - echo "Deploying to Kubernetes..."
     
-    # Create namespace
+    # Create namespace (safe to run multiple times)
+    - kubectl create namespace chatapp --dry-run=client -o yaml
     - kubectl create namespace chatapp --dry-run=client -o yaml | kubectl apply -f -
     
     # Create secrets from GitLab CI variables
-    - |
-      kubectl create secret generic app-secrets \
-        --from-literal=jwt-secret="${JWT_SECRET}" \
-        --from-literal=postgres-password="${POSTGRES_PASSWORD}" \
-        --from-literal=database-url="${DATABASE_URL}" \
-        --namespace=chatapp \
-        --dry-run=client -o yaml | kubectl apply -f -
+    - kubectl delete secret app-secrets -n chatapp --ignore-not-found=true
+    - kubectl create secret generic app-secrets --from-literal=jwt-secret="${JWT_SECRET}" --from-literal=postgres-password="${POSTGRES_PASSWORD}" --from-literal=database-url="${DATABASE_URL}" --namespace=chatapp
     
     - echo "Deploying PostgreSQL database..."
     - kubectl apply -f k8s/postgres-deployment.yml -n chatapp
     
     - echo "Waiting for PostgreSQL to be ready..."
-    - kubectl wait --for=condition=ready pod -l app=postgres -n chatapp --timeout=300s || echo "PostgreSQL pods not ready, continuing..."
+    - kubectl wait --for=condition=ready pod -l app=postgres -n chatapp --timeout=300s || true
     
     - echo "Deploying backend service..."
     - kubectl apply -f k8s/backend-deployment.yml -n chatapp
     - kubectl apply -f k8s/backend-service.yml -n chatapp
     
     - echo "Waiting for backend to be ready..."
-    - kubectl wait --for=condition=ready pod -l app=chat-app-backend -n chatapp --timeout=300s || echo "Backend pods not ready, continuing..."
+    - kubectl wait --for=condition=ready pod -l app=chat-app-backend -n chatapp --timeout=300s || true
     
     - echo "Deploying frontend service..."
     - kubectl apply -f k8s/frontend-deployment.yml -n chatapp
     - kubectl apply -f k8s/frontend-service.yml -n chatapp
     
     - echo "Setting up ingress..."
-    - kubectl apply -f k8s/ingress.yml -n chatapp || echo "Ingress not applied, continuing..."
+    - kubectl apply -f k8s/ingress.yml -n chatapp || true
     
     - echo ""
     - echo "KUBERNETES DEPLOYMENT COMPLETED!"
     - echo "====================================="
     - echo "Cluster Status:"
-    - kubectl get pods -n chatapp -o wide || echo "Could not get pods"
+    - kubectl get pods -n chatapp -o wide || true
     - echo ""
     - echo "Services:"
-    - kubectl get services -n chatapp || echo "Could not get services"
+    - kubectl get services -n chatapp || true
     - echo ""
     - echo "Ingress:"
-    - kubectl get ingress -n chatapp || echo "Could not get ingress"
+    - kubectl get ingress -n chatapp || true
     - echo ""
     - echo "Application should be accessible at:"
     - echo "Frontend - http://localhost:80"
