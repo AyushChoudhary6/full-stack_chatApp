@@ -1,13 +1,15 @@
 # =============================================================================
-# GitLab CI/CD Pipeline for Full-Stack Chat Application
+# GitLab CI/CD Pipeline - Industry Standard Architecture
 # =============================================================================
-# Docker + Kubernetes deployment with PostgreSQL and GitLab Container Registry
+# 🐳 Docker: Container Image Building
+# ☸️ Kubernetes: Container Orchestration & Management
+# 🗃️ PostgreSQL: Database Management
+# 📦 GitLab Registry: Image Storage
 
 stages:
   - test
   - build
-  - deploy-docker
-  - deploy-k8s
+  - deploy
 
 variables:
   # Docker configuration
@@ -66,8 +68,11 @@ build_frontend:
     - if: $CI_COMMIT_BRANCH == "develop"
 
 # =============================================================================
-# BUILD STAGE - Docker Images with Registry Push
+# BUILD STAGE - Docker Image Creation & Registry Push
 # =============================================================================
+# 🐳 Docker builds containerized applications
+# 📦 Images pushed to GitLab Container Registry
+# ☸️ These images will be deployed by Kubernetes
 
 build_backend_image:
   stage: build
@@ -102,188 +107,104 @@ build_frontend_image:
     - if: $CI_COMMIT_BRANCH == "develop"
 
 # =============================================================================
-# DEPLOY STAGE - Docker Compose (Development/Testing)
+# DEPLOY STAGE - Kubernetes Orchestration (using Docker images)
 # =============================================================================
+# Industry Standard: Docker builds containers, Kubernetes manages them
 
-deploy_docker:
-  stage: deploy-docker
-  image: docker:24.0.5
-  services:
-    - docker:24.0.5-dind
-  before_script:
-    # Login to GitLab Container Registry
-    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
-    # Install docker-compose
-    - apk add --no-cache curl
-    - curl -L "https://github.com/docker/compose/releases/download/v2.20.2/docker-compose-linux-x86_64" -o /usr/local/bin/docker-compose
-    - chmod +x /usr/local/bin/docker-compose
-  script:
-    # Pull the images from registry
-    - docker pull $BACKEND_IMAGE
-    - docker pull $FRONTEND_IMAGE
-    
-    # Create docker-compose.yml for local deployment
-    - |
-      cat > docker-compose.prod.yml << EOF
-      version: '3.8'
-      
-      services:
-        postgres:
-          image: postgres:13-alpine
-          environment:
-            POSTGRES_DB: ${POSTGRES_DB}
-            POSTGRES_USER: ${POSTGRES_USER}
-            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-          volumes:
-            - postgres_data:/var/lib/postgresql/data
-          ports:
-            - "5432:5432"
-          healthcheck:
-            test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-            interval: 10s
-            timeout: 5s
-            retries: 5
-        
-        backend:
-          image: ${BACKEND_IMAGE}
-          environment:
-            DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-            JWT_SECRET: ${JWT_SECRET}
-            PORT: 5000
-            NODE_ENV: production
-          ports:
-            - "5000:5000"
-          depends_on:
-            postgres:
-              condition: service_healthy
-          restart: unless-stopped
-        
-        frontend:
-          image: ${FRONTEND_IMAGE}
-          ports:
-            - "3000:80"
-          depends_on:
-            - backend
-          restart: unless-stopped
-      
-      volumes:
-        postgres_data:
-      EOF
-    
-    # Deploy the application
-    - docker-compose -f docker-compose.prod.yml down || true
-    - docker-compose -f docker-compose.prod.yml up -d
-    
-    # Wait for services to be ready
-    - sleep 30
-    
-    # Check if services are running
-    - docker-compose -f docker-compose.prod.yml ps
-    
-    # Display service URLs
-    - echo "Docker Deployment completed successfully!"
-    - echo "Frontend available at http://localhost:3000"
-    - echo "Backend API available at http://localhost:5000"
-    - echo "PostgreSQL available at localhost:5432"
-    
-  environment:
-    name: docker-local
-    url: http://localhost:3000
-  rules:
-    - if: $CI_COMMIT_BRANCH == "develop"
-    - if: $CI_COMMIT_BRANCH == "main"
-      when: manual
-  allow_failure: false
-
-# =============================================================================
-# DEPLOY STAGE - Kubernetes (Production)
-# =============================================================================
-
-deploy_kubernetes:
-  stage: deploy-k8s
+deploy_production:
+  stage: deploy
   image: bitnami/kubectl:latest
   before_script:
-    # Install kubectl and other tools
-    - apk add --no-cache curl bash
-    # Create kubectl config directory
+    # Setup kubectl for local Kubernetes cluster
     - mkdir -p ~/.kube
-    # Setup kubeconfig (assuming you have a local cluster)
-    - echo "Setting up kubectl for local cluster..."
+    - |
+      cat > ~/.kube/config << EOF
+      apiVersion: v1
+      kind: Config
+      clusters:
+      - name: local-cluster
+        cluster:
+          server: https://127.0.0.1:6443
+          insecure-skip-tls-verify: true
+      contexts:
+      - name: local-context
+        context:
+          cluster: local-cluster
+          user: local-user
+      current-context: local-context
+      users:
+      - name: local-user
+        user:
+          token: "dummy-token-for-local"
+      EOF
   script:
-    # Create namespace if it doesn't exist
-    - kubectl create namespace $KUBE_NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
-    
-    # Create ConfigMap for environment variables
+    # Replace image placeholders with actual built images
     - |
-      cat > configmap.yaml << EOF
-      apiVersion: v1
-      kind: ConfigMap
-      metadata:
-        name: chatapp-config
-        namespace: $KUBE_NAMESPACE
-      data:
-        POSTGRES_DB: "${POSTGRES_DB}"
-        POSTGRES_USER: "${POSTGRES_USER}"
-        NODE_ENV: "production"
-        PORT: "5000"
-      EOF
-    - kubectl apply -f configmap.yaml
-    
-    # Create Secret for sensitive data
-    - |
-      cat > secret.yaml << EOF
-      apiVersion: v1
-      kind: Secret
-      metadata:
-        name: chatapp-secrets
-        namespace: $KUBE_NAMESPACE
-      type: Opaque
-      data:
-        POSTGRES_PASSWORD: $(echo -n "${POSTGRES_PASSWORD}" | base64)
-        JWT_SECRET: $(echo -n "${JWT_SECRET}" | base64)
-        DATABASE_URL: $(echo -n "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-service:5432/${POSTGRES_DB}" | base64)
-      EOF
-    - kubectl apply -f secret.yaml
-    
-    # Update Kubernetes manifests with new image tags
-    - sed -i "s|BACKEND_IMAGE_PLACEHOLDER|${BACKEND_IMAGE}|g" k8s/backend-deployment.yml
-    - sed -i "s|FRONTEND_IMAGE_PLACEHOLDER|${FRONTEND_IMAGE}|g" k8s/frontend-deployment.yml
-    
-    # Deploy PostgreSQL
-    - kubectl apply -f k8s/postgres-deployment.yml
-    
-    # Deploy Backend
-    - kubectl apply -f k8s/backend-deployment.yml
-    - kubectl apply -f k8s/backend-service.yml
-    
-    # Deploy Frontend
-    - kubectl apply -f k8s/frontend-deployment.yml
-    - kubectl apply -f k8s/frontend-service.yml
-    
-    # Apply Ingress (if available)
-    - kubectl apply -f k8s/ingress.yml || echo "Ingress not applied - may not be needed for local setup"
-    
-    # Wait for deployments
-    - echo "Waiting for deployments to be ready..."
-    - kubectl wait --for=condition=available --timeout=300s deployment/postgres-deployment -n $KUBE_NAMESPACE
-    - kubectl wait --for=condition=available --timeout=300s deployment/backend-deployment -n $KUBE_NAMESPACE
-    - kubectl wait --for=condition=available --timeout=300s deployment/frontend-deployment -n $KUBE_NAMESPACE
-    
-    # Get service information
-    - echo "Kubernetes Deployment completed!"
-    - echo "Services:"
-    - kubectl get services -n $KUBE_NAMESPACE
-    - echo "Pods:"
-    - kubectl get pods -n $KUBE_NAMESPACE
-    - echo "To access the application:"
-    - echo "Frontend port-forward command kubectl port-forward service/frontend-service 3000:80 -n $KUBE_NAMESPACE"
-    - echo "Backend port-forward command kubectl port-forward service/backend-service 5000:5000 -n $KUBE_NAMESPACE"
-    
+      echo "🐳 Using Docker images built in previous stage:"
+      echo "Backend:  ${BACKEND_IMAGE}"
+      echo "Frontend: ${FRONTEND_IMAGE}"
+      
+      # Update Kubernetes manifests with actual Docker images
+      sed -i "s|BACKEND_IMAGE_PLACEHOLDER|${BACKEND_IMAGE}|g" k8s/backend-deployment.yml
+      sed -i "s|FRONTEND_IMAGE_PLACEHOLDER|${FRONTEND_IMAGE}|g" k8s/frontend-deployment.yml
+      
+      echo "🚀 Deploying to Kubernetes..."
+      
+      # Create namespace
+      kubectl create namespace chatapp --dry-run=client -o yaml | kubectl apply -f -
+      
+      # Create secrets from GitLab CI variables
+      kubectl create secret generic app-secrets \
+        --from-literal=jwt-secret="${JWT_SECRET}" \
+        --from-literal=postgres-password="${POSTGRES_PASSWORD}" \
+        --from-literal=database-url="${DATABASE_URL}" \
+        --namespace=chatapp \
+        --dry-run=client -o yaml | kubectl apply -f -
+      
+      echo "📊 Deploying PostgreSQL database..."
+      kubectl apply -f k8s/postgres-deployment.yml -n chatapp
+      
+      echo "⏳ Waiting for PostgreSQL to be ready..."
+      kubectl wait --for=condition=ready pod -l app=postgres -n chatapp --timeout=300s
+      
+      echo "🔗 Deploying backend service..."
+      kubectl apply -f k8s/backend-deployment.yml -n chatapp
+      kubectl apply -f k8s/backend-service.yml -n chatapp
+      
+      echo "⏳ Waiting for backend to be ready..."
+      kubectl wait --for=condition=ready pod -l app=chat-app-backend -n chatapp --timeout=300s
+      
+      echo "🌐 Deploying frontend service..."
+      kubectl apply -f k8s/frontend-deployment.yml -n chatapp
+      kubectl apply -f k8s/frontend-service.yml -n chatapp
+      
+      echo "🌍 Setting up ingress..."
+      kubectl apply -f k8s/ingress.yml -n chatapp
+      
+      echo ""
+      echo "🎉 KUBERNETES DEPLOYMENT SUCCESSFUL!"
+      echo "====================================="
+      echo "📋 Cluster Status:"
+      kubectl get pods -n chatapp -o wide
+      echo ""
+      echo "🔗 Services:"
+      kubectl get services -n chatapp
+      echo ""
+      echo "🌍 Ingress:"
+      kubectl get ingress -n chatapp
+      echo ""
+      echo "🚀 Application URLs:"
+      echo "   Frontend:    http://localhost:80"
+      echo "   Backend API: http://localhost:80/api"
+      echo "   Health:      http://localhost:80/health"
+      echo ""
+      echo "💡 Docker containers are now managed by Kubernetes!"
+      
   environment:
-    name: kubernetes-local
-    url: http://localhost:3000
+    name: production
+    url: http://localhost
   rules:
     - if: $CI_COMMIT_BRANCH == "main"
-    - if: $CI_COMMIT_BRANCH == "develop"
       when: manual
+    - if: $CI_COMMIT_BRANCH == "develop"
   allow_failure: false
