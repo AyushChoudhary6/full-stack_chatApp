@@ -1,129 +1,217 @@
 #!/bin/bash
 
-echo "🚀 LOCAL DEPLOYMENT FROM GITLAB REGISTRY"
-echo "========================================"
+# =============================================================================
+# Local Docker + Kubernetes Deployment Script
+# =============================================================================
+# This script replaces the GitLab CI/CD pipeline for local development
+# Industry Standard: Docker builds containers, Kubernetes orchestrates them
 
-# Get the latest commit SHA from GitLab
-echo "📡 Fetching latest commit info..."
-LATEST_COMMIT=$(git rev-parse --short HEAD)
-echo "Latest commit: $LATEST_COMMIT"
+set -e  # Exit on any error
 
-# GitLab registry URLs
-REGISTRY_BASE="registry.gitlab.com/ayushrjchoudhary2005/full-stack_chatapp"
-BACKEND_IMAGE="$REGISTRY_BASE/backend:$LATEST_COMMIT"
-FRONTEND_IMAGE="$REGISTRY_BASE/frontend:$LATEST_COMMIT"
+echo "🚀 Starting Industry-Standard Docker + Kubernetes Deployment"
+echo "=============================================================="
 
-echo ""
-echo "🐳 DOCKER IMAGES TO PULL:"
-echo "Backend:  $BACKEND_IMAGE"
-echo "Frontend: $FRONTEND_IMAGE"
-echo ""
+# Configuration
+NAMESPACE="chatapp"
+BACKEND_IMAGE="chat-app-backend:latest"
+FRONTEND_IMAGE="chat-app-frontend:latest"
 
-# Check if user is logged in to GitLab registry
-echo "🔐 Checking GitLab registry login..."
-if ! docker info | grep -q "registry.gitlab.com"; then
-    echo "⚠️  Please login to GitLab registry first:"
-    echo "   docker login registry.gitlab.com"
-    echo "   Username: your-gitlab-username"
-    echo "   Password: your-gitlab-access-token"
-    echo ""
-    read -p "🔑 Login now? (y/n): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        docker login registry.gitlab.com
-    else
-        echo "❌ Cannot proceed without registry login"
-        exit 1
-    fi
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+print_step() {
+    echo -e "${BLUE}📋 Step: $1${NC}"
+}
+
+print_success() {
+    echo -e "${GREEN}✅ $1${NC}"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠️  $1${NC}"
+}
+
+print_error() {
+    echo -e "${RED}❌ $1${NC}"
+}
+
+# =============================================================================
+# STEP 1: Build Docker Images (Like CI/CD Build Stage)
+# =============================================================================
+
+print_step "Building Docker Images"
+
+echo "🐳 Building Backend Docker Image..."
+cd backend
+docker build -t $BACKEND_IMAGE .
+cd ..
+print_success "Backend image built: $BACKEND_IMAGE"
+
+echo "🐳 Building Frontend Docker Image..."
+cd frontend
+docker build -t $FRONTEND_IMAGE .
+cd ..
+print_success "Frontend image built: $FRONTEND_IMAGE"
+
+# =============================================================================
+# STEP 2: Prepare Kubernetes Manifests
+# =============================================================================
+
+print_step "Preparing Kubernetes Manifests"
+
+# Create backup and update image placeholders in Kubernetes manifests
+cp k8s/backend-deployment.yml k8s/backend-deployment.yml.bak
+cp k8s/frontend-deployment.yml k8s/frontend-deployment.yml.bak
+
+sed -i "s|BACKEND_IMAGE_PLACEHOLDER|${BACKEND_IMAGE}|g" k8s/backend-deployment.yml
+sed -i "s|FRONTEND_IMAGE_PLACEHOLDER|${FRONTEND_IMAGE}|g" k8s/frontend-deployment.yml
+
+print_success "Kubernetes manifests updated with Docker images"
+
+# =============================================================================
+# STEP 3: Check Kubernetes Cluster
+# =============================================================================
+
+print_step "Checking Kubernetes Cluster"
+
+if ! kubectl cluster-info > /dev/null 2>&1; then
+    print_error "Kubernetes cluster not accessible!"
+    echo "Please ensure you have one of the following running:"
+    echo "  - Docker Desktop with Kubernetes enabled"
+    echo "  - Kind cluster: kind create cluster"
+    echo "  - K3s: curl -sfL https://get.k3s.io | sh -"
+    echo "  - Minikube: minikube start"
+    exit 1
 fi
 
-# Pull the latest images
-echo "📥 Pulling images from GitLab registry..."
-docker pull $BACKEND_IMAGE || {
-    echo "❌ Failed to pull backend image. Check if the image exists in registry."
-    echo "💡 You may need to run the GitLab pipeline first to build and push images."
-    exit 1
-}
+print_success "Kubernetes cluster is accessible"
+kubectl cluster-info
 
-docker pull $FRONTEND_IMAGE || {
-    echo "❌ Failed to pull frontend image. Check if the image exists in registry."
-    echo "💡 You may need to run the GitLab pipeline first to build and push images."
-    exit 1
-}
+# =============================================================================
+# STEP 4: Deploy to Kubernetes (Like CI/CD Deploy Stage)
+# =============================================================================
 
-# Create docker-compose file for local deployment
-echo "📝 Creating local docker-compose file..."
-cat > docker-compose.local.yml << EOF
-version: '3.8'
+print_step "Deploying to Kubernetes"
 
-services:
-  postgres:
-    image: postgres:13-alpine
-    environment:
-      POSTGRES_DB: chatapp
-      POSTGRES_USER: chatapp_user
-      POSTGRES_PASSWORD: 8gaq834qizIYaG3c
-    volumes:
-      - postgres_data_local:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U chatapp_user -d chatapp"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+# Create namespace
+echo "� Creating namespace: $NAMESPACE"
+kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
-  backend:
-    image: $BACKEND_IMAGE
-    environment:
-      DATABASE_URL: postgresql://chatapp_user:8gaq834qizIYaG3c@postgres:5432/chatapp
-      JWT_SECRET: b7f3795f5cd50589b62ab5794272a413
-      PORT: 5000
-      NODE_ENV: production
-    ports:
-      - "5000:5000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
+# Create secrets (you'll need to set these environment variables)
+echo "🔐 Creating application secrets..."
+kubectl delete secret app-secrets -n $NAMESPACE --ignore-not-found=true
 
-  frontend:
-    image: $FRONTEND_IMAGE
-    ports:
-      - "3000:80"
-    depends_on:
-      - backend
-    restart: unless-stopped
+# Default values for local development
+JWT_SECRET=${JWT_SECRET:-"your-super-secret-jwt-key-for-local-development"}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-"postgres123"}
+DATABASE_URL=${DATABASE_URL:-"postgresql://chatapp_user:postgres123@postgres-service:5432/chatapp"}
 
-volumes:
-  postgres_data_local:
-EOF
+kubectl create secret generic app-secrets \
+    --from-literal=jwt-secret="$JWT_SECRET" \
+    --from-literal=postgres-password="$POSTGRES_PASSWORD" \
+    --from-literal=database-url="$DATABASE_URL" \
+    --namespace=$NAMESPACE
 
-# Stop any existing containers
-echo "🛑 Stopping existing containers..."
-docker-compose -f docker-compose.local.yml down || true
+print_success "Secrets created"
 
-# Start the services
-echo "🚀 Starting services locally..."
-docker-compose -f docker-compose.local.yml up -d
+# Deploy PostgreSQL
+echo "🗄️  Deploying PostgreSQL database..."
+kubectl apply -f k8s/postgres-deployment.yml -n $NAMESPACE
 
-# Wait for services to be ready
-echo "⏳ Waiting for services to start..."
-sleep 15
+echo "⏳ Waiting for PostgreSQL to be ready..."
+kubectl wait --for=condition=ready pod -l app=postgres -n $NAMESPACE --timeout=300s || print_warning "PostgreSQL pods not ready yet"
 
-# Check service status
+# Deploy Backend
+echo "🔧 Deploying backend service..."
+kubectl apply -f k8s/backend-deployment.yml -n $NAMESPACE
+kubectl apply -f k8s/backend-service.yml -n $NAMESPACE
+
+echo "⏳ Waiting for backend to be ready..."
+kubectl wait --for=condition=ready pod -l app=chat-app-backend -n $NAMESPACE --timeout=300s || print_warning "Backend pods not ready yet"
+
+# Deploy Frontend
+echo "🌐 Deploying frontend service..."
+kubectl apply -f k8s/frontend-deployment.yml -n $NAMESPACE
+kubectl apply -f k8s/frontend-service.yml -n $NAMESPACE
+
+# Setup Ingress (optional)
+echo "🌍 Setting up ingress..."
+kubectl apply -f k8s/ingress.yml -n $NAMESPACE 2>/dev/null || print_warning "Ingress not applied (may require ingress controller)"
+
+# =============================================================================
+# STEP 5: Display Results
+# =============================================================================
+
+print_step "Deployment Results"
+
 echo ""
-echo "📊 SERVICE STATUS:"
-docker-compose -f docker-compose.local.yml ps
+echo "🎉 KUBERNETES DEPLOYMENT COMPLETED!"
+echo "====================================="
+echo ""
+echo "📊 Cluster Status:"
+kubectl get pods -n $NAMESPACE -o wide 2>/dev/null || print_warning "Could not get pods"
+echo ""
+echo "🔗 Services:"
+kubectl get services -n $NAMESPACE 2>/dev/null || print_warning "Could not get services"
+echo ""
+echo "🌐 Ingress:"
+kubectl get ingress -n $NAMESPACE 2>/dev/null || print_warning "Could not get ingress"
+echo ""
+echo "🎯 Access Your Application:"
+echo "================================"
 
-# Display access URLs
+# Get service ports
+FRONTEND_PORT=$(kubectl get service frontend-service -n $NAMESPACE -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "NodePort not available")
+BACKEND_PORT=$(kubectl get service backend-service -n $NAMESPACE -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "NodePort not available")
+
+if [[ "$FRONTEND_PORT" != "NodePort not available" ]]; then
+    echo "🌐 Frontend: http://localhost:$FRONTEND_PORT"
+    echo "🔧 Backend API: http://localhost:$BACKEND_PORT"
+else
+    echo "🌐 Frontend: Use port-forward -> kubectl port-forward service/frontend-service 3000:80 -n $NAMESPACE"
+    echo "� Backend API: Use port-forward -> kubectl port-forward service/backend-service 5000:5000 -n $NAMESPACE"
+fi
+
+echo "🏥 Health Check: Use port-forward -> kubectl port-forward service/backend-service 5000:5000 -n $NAMESPACE (then visit http://localhost:5000/health)"
 echo ""
-echo "🎉 DEPLOYMENT COMPLETE!"
-echo "======================="
-echo "🌐 Frontend:    http://localhost:3000"
-echo "🔗 Backend API: http://localhost:5000"
-echo "🗄️ Database:   localhost:5432"
-echo "📊 Health:     http://localhost:5000/health"
+echo "� Docker Images Used:"
+echo "  Backend: $BACKEND_IMAGE"
+echo "  Frontend: $FRONTEND_IMAGE"
 echo ""
-echo "💡 To stop services: docker-compose -f docker-compose.local.yml down"
-echo "📝 To view logs: docker-compose -f docker-compose.local.yml logs -f"
+echo "☸️  Kubernetes is now orchestrating your Docker containers!"
+echo "🔄 This follows the same industry-standard pattern as Netflix, Google, and Amazon"
+
+# =============================================================================
+# USEFUL COMMANDS
+# =============================================================================
+
+echo ""
+echo "📚 Useful Commands:"
+echo "==================="
+echo "View logs:"
+echo "  kubectl logs -l app=chat-app-backend -n $NAMESPACE"
+echo "  kubectl logs -l app=chat-app-frontend -n $NAMESPACE"
+echo ""
+echo "Port forward services:"
+echo "  kubectl port-forward service/frontend-service 3000:80 -n $NAMESPACE"
+echo "  kubectl port-forward service/backend-service 5000:5000 -n $NAMESPACE"
+echo ""
+echo "Scale applications:"
+echo "  kubectl scale deployment backend-deployment --replicas=3 -n $NAMESPACE"
+echo "  kubectl scale deployment frontend-deployment --replicas=2 -n $NAMESPACE"
+echo ""
+echo "Clean up:"
+echo "  kubectl delete namespace $NAMESPACE"
+echo ""
+
+# Restore original files
+echo "� Restoring original Kubernetes manifests..."
+cp k8s/backend-deployment.yml.bak k8s/backend-deployment.yml
+cp k8s/frontend-deployment.yml.bak k8s/frontend-deployment.yml
+rm k8s/*.bak
+
+print_success "🎊 Industry-Standard Docker + Kubernetes Deployment Complete!"
